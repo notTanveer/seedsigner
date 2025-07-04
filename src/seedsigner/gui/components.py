@@ -2,9 +2,7 @@ import logging
 import math
 import os
 import pathlib
-import re
 import time
-
 from dataclasses import dataclass
 from decimal import Decimal
 from gettext import gettext as _
@@ -21,15 +19,16 @@ logger = logging.getLogger(__name__)
 
 
 
-# TODO: Remove all pixel hard coding
 class GUIConstants:
-    EDGE_PADDING = 8
-    COMPONENT_PADDING = 8
-    LIST_ITEM_PADDING = 4
-
+    BASE_UNIT = 8  # Base unit for all spacing and sizing
+    
+    EDGE_PADDING = BASE_UNIT
+    COMPONENT_PADDING = BASE_UNIT
+    LIST_ITEM_PADDING = BASE_UNIT // 2
+    
     BACKGROUND_COLOR = "#000000"
     INACTIVE_COLOR = "#414141"
-    ACCENT_COLOR = "#FF9F0A" # Active Color
+    ACCENT_COLOR = "#FF9F0A"
     WARNING_COLOR = "#FFD60A"
     DIRE_WARNING_COLOR = "#FF5700"
     ERROR_COLOR = "#FF1B0A"
@@ -39,127 +38,207 @@ class GUIConstants:
     TESTNET_COLOR = "#00F100"
     REGTEST_COLOR = "#00CAF1"
     GREEN_INDICATOR_COLOR = "#00FF00"
+    NOTIFICATION_COLOR = "#00F100"
 
     ICON_FONT_NAME__FONT_AWESOME = "Font_Awesome_6_Free-Solid-900"
     ICON_FONT_NAME__SEEDSIGNER = "seedsigner-icons"
-    ICON_FONT_SIZE = 22
-    ICON_INLINE_FONT_SIZE = 24
-    ICON_LARGE_BUTTON_SIZE = 48
-    ICON_TOAST_FONT_SIZE = 30
-    ICON_PRIMARY_SCREEN_SIZE = 50
-
+    
     BASE_LOCALE_FONTS = {
         "default": "OpenSans-Regular",
-        # SettingsConstants.LOCALE__ARABIC: "NotoSansAR-Regular",
         SettingsConstants.LOCALE__CHINESE_SIMPLIFIED: "NotoSansSC-Regular",
-        # SettingsConstants.LOCALE__CHINESE_TRADITIONAL: "NotoSansTC-Regular",
         SettingsConstants.LOCALE__JAPANESE: "NotoSansJP-Regular",
         SettingsConstants.LOCALE__KOREAN: "NotoSansKR-Regular",
     }
 
     TOP_NAV_TITLE_FONT_NAME = BASE_LOCALE_FONTS.copy()
     TOP_NAV_TITLE_FONT_NAME["default"] = "OpenSans-SemiBold"
-    TOP_NAV_TITLE_FONT_SIZE = {
-        "default": 20,
-        SettingsConstants.LOCALE__JAPANESE: 22,  # Titles won't render below 22px
-        SettingsConstants.LOCALE__KOREAN: 23,    # Titles won't render below 23px
-        SettingsConstants.LOCALE__CHINESE_SIMPLIFIED: 23,  # Some chars won't render below 23px
-    }
-    TOP_NAV_HEIGHT = 48
-    TOP_NAV_BUTTON_SIZE = 32
-
+    
     BODY_FONT_NAME = BASE_LOCALE_FONTS.copy()
-    BODY_FONT_SIZE = {
-        "default": 17,
-        SettingsConstants.LOCALE__JAPANESE: 18,
-        SettingsConstants.LOCALE__KOREAN: 18,
-        SettingsConstants.LOCALE__CHINESE_SIMPLIFIED: 18,
-    }
-    BODY_FONT_MAX_SIZE = TOP_NAV_TITLE_FONT_SIZE["default"]
-    BODY_FONT_MIN_SIZE = 15
-    BODY_FONT_COLOR = "#FCFCFC"
-    BODY_LINE_SPACING = COMPONENT_PADDING
-
+    BUTTON_FONT_NAME = BASE_LOCALE_FONTS.copy()
+    BUTTON_FONT_NAME["default"] = "OpenSans-SemiBold"
+    
     FIXED_WIDTH_FONT_NAME = "Inconsolata-Regular"
     FIXED_WIDTH_EMPHASIS_FONT_NAME = "Inconsolata-SemiBold"
 
-    LABEL_FONT_SIZE = BODY_FONT_MIN_SIZE
+    # Font colors
+    BODY_FONT_COLOR = "#FCFCFC"
     LABEL_FONT_COLOR = "#777777"
-
-    BUTTON_FONT_NAME = BASE_LOCALE_FONTS.copy()
-    BUTTON_FONT_NAME["default"] = "OpenSans-SemiBold"
-    BUTTON_FONT_SIZE = {
-        "default": 18,
-        # "ar": 16,
-        SettingsConstants.LOCALE__JAPANESE: 20,
-        SettingsConstants.LOCALE__KOREAN: 20,
-        SettingsConstants.LOCALE__CHINESE_SIMPLIFIED: 20,
-    }
     BUTTON_FONT_COLOR = "#FCFCFC"
-    BUTTON_BACKGROUND_COLOR = "#2C2C2C"
-    BUTTON_HEIGHT = 32
     BUTTON_SELECTED_FONT_COLOR = BACKGROUND_COLOR
+    BUTTON_BACKGROUND_COLOR = "#2C2C2C"
+
+    @classmethod
+    def get_screen_dimensions(cls):
+        """Get current screen dimensions from renderer"""
+        renderer = Renderer.get_instance()
+        return renderer.canvas_width, renderer.canvas_height
+
+    @classmethod
+    def get_responsive_size(cls, base_size: int, scale_factor: float = 1.0) -> int:
+        """Calculate responsive size based on screen dimensions"""
+        width, height = cls.get_screen_dimensions()
+        # Use the smaller dimension as the base for scaling
+        base_dimension = min(width, height)
+        # Assume 240px as the reference dimension (common for small displays)
+        reference_dimension = 240
+        scale = (base_dimension / reference_dimension) * scale_factor
+        return max(1, int(base_size * scale))
+
+    @classmethod
+    def get_icon_size(cls, size_type: str = "default") -> int:
+        """Get icon size based on type and screen size"""
+        base_sizes = {
+            "small": 16,
+            "default": 22,
+            "inline": 24,
+            "large": 48,
+            "toast": 30,
+            "primary": 50,
+        }
+        base_size = base_sizes.get(size_type, base_sizes["default"])
+        return cls.get_responsive_size(base_size)
+
+    @classmethod
+    def get_font_size(cls, size_type: str = "body", locale: str = None) -> int:
+        """Get font size based on type, locale, and screen size"""
+        if not locale:
+            locale = Settings.get_instance().get_value(SettingsConstants.SETTING__LOCALE)
+        
+        base_sizes = {
+            "body": {
+                "default": 17,
+                SettingsConstants.LOCALE__JAPANESE: 18,
+                SettingsConstants.LOCALE__KOREAN: 18,
+                SettingsConstants.LOCALE__CHINESE_SIMPLIFIED: 18,
+            },
+            "title": {
+                "default": 20,
+                SettingsConstants.LOCALE__JAPANESE: 22,
+                SettingsConstants.LOCALE__KOREAN: 23,
+                SettingsConstants.LOCALE__CHINESE_SIMPLIFIED: 23,
+            },
+            "button": {
+                "default": 18,
+                SettingsConstants.LOCALE__JAPANESE: 20,
+                SettingsConstants.LOCALE__KOREAN: 20,
+                SettingsConstants.LOCALE__CHINESE_SIMPLIFIED: 20,
+            },
+            "label": {
+                "default": 15,
+            }
+        }
+        
+        size_dict = base_sizes.get(size_type, base_sizes["body"])
+        base_size = size_dict.get(locale, size_dict["default"])
+        
+        # Apply responsive scaling
+        return cls.get_responsive_size(base_size)
+
+    @classmethod
+    def get_component_height(cls, component_type: str = "button") -> int:
+        """Get component height based on type and screen size"""
+        base_heights = {
+            "button": 32,
+            "top_nav": 48,
+            "list_item": 40,
+        }
+        base_height = base_heights.get(component_type, base_heights["button"])
+        return cls.get_responsive_size(base_height)
+
+    @classmethod
+    def get_border_radius(cls, size: str = "default") -> int:
+        """Get border radius based on size and screen"""
+        base_radii = {
+            "small": 4,
+            "default": 8,
+            "large": 12,
+        }
+        base_radius = base_radii.get(size, base_radii["default"])
+        return cls.get_responsive_size(base_radius)
+
+    @classmethod
+    def get_line_spacing(cls) -> int:
+        """Get line spacing based on screen size"""
+        return cls.get_responsive_size(cls.BASE_UNIT)
+
+    # Legacy property accessors for backward compatibility
+    @property
+    def ICON_FONT_SIZE(self) -> int:
+        return self.get_icon_size("default")
     
-    NOTIFICATION_COLOR = "#00F100"
+    @property
+    def ICON_INLINE_FONT_SIZE(self) -> int:
+        return self.get_icon_size("inline")
+    
+    @property
+    def ICON_LARGE_BUTTON_SIZE(self) -> int:
+        return self.get_icon_size("large")
+    
+    @property
+    def ICON_TOAST_FONT_SIZE(self) -> int:
+        return self.get_icon_size("toast")
+    
+    @property
+    def ICON_PRIMARY_SCREEN_SIZE(self) -> int:
+        return self.get_icon_size("primary")
+    
+    @property
+    def TOP_NAV_HEIGHT(self) -> int:
+        return self.get_component_height("top_nav")
+    
+    @property
+    def TOP_NAV_BUTTON_SIZE(self) -> int:
+        return self.get_responsive_size(32)
+    
+    @property
+    def BUTTON_HEIGHT(self) -> int:
+        return self.get_component_height("button")
+    
+    @property
+    def BODY_LINE_SPACING(self) -> int:
+        return self.get_line_spacing()
+    
+    @property
+    def BODY_FONT_MAX_SIZE(self) -> int:
+        return self.get_font_size("title")
+    
+    @property
+    def BODY_FONT_MIN_SIZE(self) -> int:
+        return self.get_font_size("label")
+    
+    @property
+    def LABEL_FONT_SIZE(self) -> int:
+        return self.get_font_size("label")
 
-
+    # Static methods for font access (backward compatibility)
     @staticmethod
     def get_body_font_name(locale=None):
         if not locale:
             locale = Settings.get_instance().get_value(SettingsConstants.SETTING__LOCALE)
-        if locale in GUIConstants.BODY_FONT_NAME:
-            return GUIConstants.BODY_FONT_NAME[locale]
-        else:
-            return GUIConstants.BODY_FONT_NAME["default"]
-
+        return GUIConstants.BODY_FONT_NAME.get(locale, GUIConstants.BODY_FONT_NAME["default"])
 
     @staticmethod
     def get_body_font_size(locale=None):
-        if not locale:
-            locale = Settings.get_instance().get_value(SettingsConstants.SETTING__LOCALE)
-        if locale in GUIConstants.BODY_FONT_SIZE:
-            return GUIConstants.BODY_FONT_SIZE[locale]
-        else:
-            return GUIConstants.BODY_FONT_SIZE["default"]
-
+        return GUIConstants.get_font_size("body", locale)
 
     @staticmethod
     def get_top_nav_title_font_name():
         locale = Settings.get_instance().get_value(SettingsConstants.SETTING__LOCALE)
-        if locale in GUIConstants.TOP_NAV_TITLE_FONT_NAME:
-            return GUIConstants.TOP_NAV_TITLE_FONT_NAME[locale]
-        else:
-            return GUIConstants.TOP_NAV_TITLE_FONT_NAME["default"]
-
+        return GUIConstants.TOP_NAV_TITLE_FONT_NAME.get(locale, GUIConstants.TOP_NAV_TITLE_FONT_NAME["default"])
 
     @staticmethod
     def get_top_nav_title_font_size():
-        locale = Settings.get_instance().get_value(SettingsConstants.SETTING__LOCALE)
-        if locale in GUIConstants.TOP_NAV_TITLE_FONT_SIZE:
-            return GUIConstants.TOP_NAV_TITLE_FONT_SIZE[locale]
-        else:
-            return GUIConstants.TOP_NAV_TITLE_FONT_SIZE["default"]
-
+        return GUIConstants.get_font_size("title")
 
     @staticmethod
     def get_button_font_name(locale=None):
         if not locale:
             locale = Settings.get_instance().get_value(SettingsConstants.SETTING__LOCALE)
-        if locale in GUIConstants.BUTTON_FONT_NAME:
-            return GUIConstants.BUTTON_FONT_NAME[locale]
-        else:
-            return GUIConstants.BUTTON_FONT_NAME["default"]
-
+        return GUIConstants.BUTTON_FONT_NAME.get(locale, GUIConstants.BUTTON_FONT_NAME["default"])
 
     @staticmethod
     def get_button_font_size(locale=None):
-        if not locale:
-            locale = Settings.get_instance().get_value(SettingsConstants.SETTING__LOCALE)
-        if locale in GUIConstants.BUTTON_FONT_SIZE:
-            return GUIConstants.BUTTON_FONT_SIZE[locale]
-        else:
-            return GUIConstants.BUTTON_FONT_SIZE["default"]
-
+        return GUIConstants.get_font_size("button", locale)
 
 
 class FontAwesomeIconConstants:
@@ -373,27 +452,26 @@ class TextArea(BaseComponent):
         Attrs with defaults must be listed last.
     """
     text: str = "My text content"
-    width: int = None       # TODO: Implement autosize width?
-    height: int = None      # None = special case: autosize to min height
+    width: int = None
+    height: int = None
     screen_x: int = 0
     screen_y: int = 0
     scroll_y: int = 0
-    min_text_x: int = 0  # Text can not start at x any less than this
+    min_text_x: int = 0
     background_color: str = GUIConstants.BACKGROUND_COLOR
     font_name: str = None
     font_size: int = None
     font_color: str = GUIConstants.BODY_FONT_COLOR
-    edge_padding: int = GUIConstants.EDGE_PADDING
+    edge_padding: int = None
     is_text_centered: bool = True
-    supersampling_factor: int = 2  # 1 = disabled; 2 = default, double sample (4px square rendered for 1px)
+    supersampling_factor: int = 2
     auto_line_break: bool = True
     allow_text_overflow: bool = False
     is_horizontal_scrolling_enabled: bool = False
-    horizontal_scroll_speed: int = 40  # px per sec
+    horizontal_scroll_speed: int = None
     horizontal_scroll_begin_hold_secs: float = 2.0
     horizontal_scroll_end_hold_secs: float = 1.0
-    height_ignores_below_baseline: bool = False  # If True, characters that render below the baseline (e.g. "pqgy") will not affect the final height calculation
-
+    height_ignores_below_baseline: bool = False
 
     def __post_init__(self):
         if self.is_horizontal_scrolling_enabled and self.auto_line_break:
@@ -407,6 +485,10 @@ class TextArea(BaseComponent):
             self.font_name = GUIConstants.get_body_font_name()
         if not self.font_size:
             self.font_size = GUIConstants.get_body_font_size()
+        if self.edge_padding is None:
+            self.edge_padding = GUIConstants.EDGE_PADDING
+        if self.horizontal_scroll_speed is None:
+            self.horizontal_scroll_speed = GUIConstants.get_responsive_size(40)
 
         super().__post_init__()
 
@@ -416,7 +498,7 @@ class TextArea(BaseComponent):
         if self.screen_x + self.width > self.canvas_width:
             self.width = self.canvas_width - self.screen_x
 
-        self.line_spacing = GUIConstants.BODY_LINE_SPACING
+        self.line_spacing = GUIConstants.get_line_spacing()
 
         # Calculate the actual font height from the "baseline" anchor ("_s")
         font = Fonts.get_font(self.font_name, self.font_size)
@@ -766,10 +848,13 @@ class Icon(BaseComponent):
     screen_x: int = 0
     screen_y: int = 0
     icon_name: str = SeedSignerIconConstants.BITCOIN_ALT
-    icon_size: int = GUIConstants.ICON_FONT_SIZE
+    icon_size: int = None
     icon_color: str = GUIConstants.BODY_FONT_COLOR
 
     def __post_init__(self):
+        if self.icon_size is None:
+            self.icon_size = GUIConstants.get_icon_size("default")
+        
         super().__post_init__()
 
         if SeedSignerIconConstants.MIN_VALUE <= self.icon_name and self.icon_name <= SeedSignerIconConstants.MAX_VALUE:
@@ -800,7 +885,7 @@ class IconTextLine(BaseComponent):
     """
     height: int = None
     icon_name: str = None
-    icon_size: int = GUIConstants.ICON_FONT_SIZE
+    icon_size: int = None
     icon_color: str = GUIConstants.BODY_FONT_COLOR
     label_text: str = None
     value_text: str = ""
@@ -817,6 +902,9 @@ class IconTextLine(BaseComponent):
             self.font_name = GUIConstants.get_body_font_name()
         if not self.font_size:
             self.font_size = GUIConstants.get_body_font_size()
+        if self.icon_size is None:
+            self.icon_size = GUIConstants.get_icon_size("default")
+        
         super().__post_init__()
 
         if self.height is not None and self.label_text:
@@ -833,8 +921,7 @@ class IconTextLine(BaseComponent):
                 icon_color=self.icon_color
             )
 
-            self.icon_horizontal_spacer = int(GUIConstants.COMPONENT_PADDING/2)
-
+            self.icon_horizontal_spacer = GUIConstants.get_responsive_size(GUIConstants.COMPONENT_PADDING // 2)
             text_screen_x = self.screen_x + self.icon.width + self.icon_horizontal_spacer
         else:
             text_screen_x = self.screen_x
@@ -844,7 +931,7 @@ class IconTextLine(BaseComponent):
                 image_draw=self.image_draw,
                 canvas=self.canvas,
                 text=self.label_text,
-                font_size=GUIConstants.get_body_font_size() - 2,
+                font_size=GUIConstants.get_font_size("body") - GUIConstants.get_responsive_size(2),
                 font_color=GUIConstants.LABEL_FONT_COLOR,
                 edge_padding=0,
                 is_text_centered=self.is_text_centered if not self.icon_name else False,
@@ -858,7 +945,7 @@ class IconTextLine(BaseComponent):
         
         value_textarea_screen_y = self.screen_y
         if self.label_text:
-            label_padding_y = int(GUIConstants.COMPONENT_PADDING / 2)
+            label_padding_y = GUIConstants.get_responsive_size(GUIConstants.COMPONENT_PADDING // 2)
             value_textarea_screen_y += self.label_textarea.height + label_padding_y
 
         self.value_textarea = TextArea(
@@ -916,7 +1003,7 @@ class IconTextLine(BaseComponent):
 class FormattedAddress(BaseComponent):
     """
         Display a Bitcoin address in a "{first 7} {middle} {last 7}" formatted view with
-        a possible/likely line break in the middle and using a fixed-width font:
+        a possible/likely line break in the middle and using a fixed-width font.
 
         bc1q567 abcdefg1234567abcdefg
         1234567abcdefg1234567 1234567
@@ -936,19 +1023,23 @@ class FormattedAddress(BaseComponent):
     screen_y: int = 0
     address: str = None
     max_lines: int = None
+    line_spacing: int = None
     font_name: str = GUIConstants.FIXED_WIDTH_FONT_NAME
-    font_size: int = 24
+    font_size: int = None
     font_accent_color: str = GUIConstants.ACCENT_COLOR
     font_base_color: str = GUIConstants.LABEL_FONT_COLOR
 
     def __post_init__(self):
+        if self.font_size is None:
+            self.font_size = GUIConstants.get_responsive_size(24)
+        if self.line_spacing is None:
+            self.line_spacing = GUIConstants.get_line_spacing()
+        
         super().__post_init__()
+        
         if self.width == 0:
             self.width = self.renderer.canvas_width
         
-        self.font = Fonts.get_font(self.font_name, self.font_size)
-        self.accent_font = Fonts.get_font(GUIConstants.FIXED_WIDTH_EMPHASIS_FONT_NAME, self.font_size)
-
         # Fixed width font means we only have to measure one max-height character
         left, top, right, bottom  = self.font.getbbox("Q")
         char_width, char_height = right - left, bottom - top
@@ -1074,7 +1165,7 @@ class FormattedAddress(BaseComponent):
                     ))
 
                 remaining_display_str = remaining_display_str[max_chars_per_line:]
-                cur_y += char_height + GUIConstants.BODY_LINE_SPACING
+                cur_y += char_height + GUIConstants.get_line_spacing()
         
         self.height = cur_y
     
@@ -1088,24 +1179,23 @@ class FormattedAddress(BaseComponent):
 @dataclass
 class BtcAmount(BaseComponent):
     """
-        Display btc value based on the SETTING__BTC_DENOMINATION Setting:
-        * btc: "B" icon + 8-decimal amount + "btc" (can truncate zero decimals to .0 or .09)
-        * sats: "B" icon + comma-separated amount + "sats"
-        * threshold: btc display at or above 0.01 btc; otherwise sats
-        * btcsatshybrd: "B" icon + 2-decimal amount + "|" + up to 6-digit, comma-separated sats + "sats"
+        Display btc value based on the SETTING__BTC_DENOMINATION Setting.
     """
     total_sats: int = None
-    icon_size: int = 34
-    font_size: int = 24
+    icon_size: int = None
+    font_size: int = None
     screen_x: int = 0
     screen_y: int = None
 
 
     def __post_init__(self):
+        if self.icon_size is None:
+            self.icon_size = GUIConstants.get_responsive_size(34)
+        if self.font_size is None:
+            self.font_size = GUIConstants.get_responsive_size(24)
+        
         super().__post_init__()
-        self.sub_components: List[BaseComponent] = []
-        self.paste_image: Image.Image = None
-        self.paste_coords = None
+        
         denomination = Settings.get_instance().get_value(SettingsConstants.SETTING__BTC_DENOMINATION)
         network = Settings.get_instance().get_value(SettingsConstants.SETTING__NETWORK)
 
@@ -1321,74 +1411,53 @@ class BtcAmount(BaseComponent):
 @dataclass
 class Button(BaseComponent):
     """
-    Buttons offer two rendering methods:
-
-    * Reusable in-memory image (is_scrollable_text = True; default): For both active and
-        inactive states, the text is rendered once (on a just-in-time basis) into an
-        in-memory image that is then reused as needed during the life of the Component.
-
-        Specifically built with l10n in mind. Will automatically add scrolling via
-        ScrollableTextLine for the Button's active state when necessary; a static
-        TextArea is used otherwise.
-
-        This means that this setting is not suitable for Buttons whose
-        text label needs to interactively change (e.g. the "ABC" vs "abc" soft keys in
-        the passphrase entry Keyboard). 
-
-    * Real-time text (is_scrollable_text = False): The label text's active/inactive state
-        is just rendered as basic text on-the-fly, so it can support uses where the button
-        label can change. Text scrolling is not supported in this mode so in general it
-        should not to used with l10n content whose length might vary by language.
-
+    Buttons offer two rendering methods with responsive sizing.
     """
     text: str = "Button Label"
-    active_text: str = None  # Optional alt text to replace the button label when the button is selected
+    active_text: str = None
     screen_x: int = 0
     screen_y: int = 0
     scroll_y: int = 0
     width: int = None
     height: int = None
-    icon_name: str = None   # Optional icon to accompany the text
-    icon_size: int = GUIConstants.ICON_INLINE_FONT_SIZE
+    icon_name: str = None
+    icon_size: int = None
     icon_color: str = GUIConstants.BUTTON_FONT_COLOR
     selected_icon_color: str = "black"
     icon_y_offset: int = 0
-    is_icon_inline: bool = True    # True = render next to text; False = render centered above text
-    right_icon_name: str = None    # Optional icon rendered right-justified
-    right_icon_size: int = GUIConstants.ICON_INLINE_FONT_SIZE
+    is_icon_inline: bool = True
+    right_icon_name: str = None
+    right_icon_size: int = None
     right_icon_color: str = GUIConstants.BUTTON_FONT_COLOR
     text_y_offset: int = 0
     background_color: str = GUIConstants.BUTTON_BACKGROUND_COLOR
     selected_color: str = GUIConstants.ACCENT_COLOR
-
-    # Cannot define these class attrs w/the get_*_font_*() methods because the attrs will
-    # not be dynamically reinterpreted after initial class import.
     font_name: str = None
     font_size: int = None
-
     font_color: str = GUIConstants.BUTTON_FONT_COLOR
     selected_font_color: str = GUIConstants.BUTTON_SELECTED_FONT_COLOR
     outline_color: str = None
     selected_outline_color: str = None
     is_text_centered: bool = True
     is_selected: bool = False
-    is_scrollable_text: bool = True  # True: active state will automatically scroll if necessary, text is rendered once (not dynamic)
-
+    is_scrollable_text: bool = True
 
     def __post_init__(self):
         if not self.font_name:
             self.font_name = GUIConstants.get_button_font_name()
-        
         if not self.font_size:
             self.font_size = GUIConstants.get_button_font_size()
+        if self.icon_size is None:
+            self.icon_size = GUIConstants.get_icon_size("inline")
+        if self.right_icon_size is None:
+            self.right_icon_size = GUIConstants.get_icon_size("inline")
         
         super().__post_init__()
 
         if not self.width:
-            self.width = self.canvas_width - 2*GUIConstants.EDGE_PADDING
-
+            self.width = self.canvas_width - 2 * GUIConstants.EDGE_PADDING
         if not self.height:
-            self.height = GUIConstants.BUTTON_HEIGHT
+            self.height = GUIConstants.get_component_height("button")
         
         if not self.icon_color:
             self.icon_color = GUIConstants.BUTTON_FONT_COLOR
@@ -1464,7 +1533,7 @@ class Button(BaseComponent):
                         self.icon_x = self.text_x - (self.icon.width + icon_padding)
                     else:
                         # TODO: Is an inline icon but w/no text even a sensible input configuration?
-                        self.icon_x = math.ceil((self.width - self.icon.width)/2)
+                        self.icon_x = math.ceil((self.width - self.icon.width) / 2)
 
                 else:
                     if self.text:
@@ -1489,7 +1558,7 @@ class Button(BaseComponent):
 
             self.right_icon_x = self.width - self.right_icon.width - GUIConstants.COMPONENT_PADDING
 
-            self.right_icon_y = math.ceil((self.height - self.right_icon.height)/2)
+            self.right_icon_y = math.ceil((self.height - self.right_icon.height) / 2)
 
         if self.text and self.is_scrollable_text:
             button_kwargs = dict(
@@ -1540,6 +1609,9 @@ class Button(BaseComponent):
             font_color = self.font_color
             outline_color = self.outline_color
 
+        border_radius = GUIConstants.get_border_radius("default")
+        border_width = GUIConstants.get_responsive_size(2)
+
         self.image_draw.rounded_rectangle(
             (
                 self.screen_x,
@@ -1548,9 +1620,9 @@ class Button(BaseComponent):
                 self.screen_y + self.height - self.scroll_y
             ),
             fill=background_color,
-            radius=8,
+            radius=border_radius,
             outline=outline_color,
-            width=2,
+            width=border_width,
         )
 
         if self.text is not None:
@@ -1650,13 +1722,17 @@ class IconButton(Button):
     """
         A button that is just an icon (e.g. the BACK arrow)
     """
-    icon_size: int = GUIConstants.ICON_INLINE_FONT_SIZE
+    icon_size: int = None
     text: str = None
     is_icon_inline: bool = False
     is_text_centered: bool = True
     is_scrollable_text: bool = False
 
 
+    def __post_init__(self):
+        if self.icon_size is None:
+            self.icon_size = GUIConstants.get_icon_size("inline")
+        super().__post_init__()
 
 @dataclass
 class LargeIconButton(IconButton):
@@ -1664,77 +1740,82 @@ class LargeIconButton(IconButton):
         A button that is primarily a big icon (e.g. the Home screen buttons) w/text below
         the icon.
     """
-    icon_size: int = GUIConstants.ICON_LARGE_BUTTON_SIZE
-    icon_y_offset: int = GUIConstants.COMPONENT_PADDING
+    icon_size: int = None
+    icon_y_offset: int = None
     is_scrollable_text: bool = True
 
 
+    def __post_init__(self):
+        if self.icon_size is None:
+            self.icon_size = GUIConstants.get_icon_size("large")
+        if self.icon_y_offset is None:
+            self.icon_y_offset = GUIConstants.COMPONENT_PADDING
+        super().__post_init__()
 
 @dataclass
 class TopNav(BaseComponent):
     text: str = "Screen Title"
     width: int = None
-    height: int = GUIConstants.TOP_NAV_HEIGHT
+    height: int = None
     background_color: str = GUIConstants.BACKGROUND_COLOR
     icon_name: str = None
     icon_color: str = GUIConstants.BODY_FONT_COLOR
-
-    # Cannot define these class attrs w/the get_*_font_*() methods because the attrs will
-    # not be dynamically reinterpreted after initial class import.
     font_name: str = None
     font_size: int = None
-
     font_color: str = GUIConstants.BODY_FONT_COLOR
     show_back_button: bool = True
     show_power_button: bool = False
     is_selected: bool = False
 
-
     def __post_init__(self):
         if not self.font_name:
             self.font_name = GUIConstants.get_top_nav_title_font_name()
-        
         if not self.font_size:
             self.font_size = GUIConstants.get_top_nav_title_font_size()
+        if self.height is None:
+            self.height = GUIConstants.get_component_height("top_nav")
         
         super().__post_init__()
+        
         if not self.width:
             self.width = self.canvas_width
+
+        button_size = GUIConstants.get_responsive_size(32)
+        edge_padding = GUIConstants.EDGE_PADDING
+        component_padding = GUIConstants.COMPONENT_PADDING
 
         if self.show_back_button:
             self.left_button = IconButton(
                 icon_name=SeedSignerIconConstants.BACK,
-                icon_size=GUIConstants.ICON_INLINE_FONT_SIZE,
-                screen_x=GUIConstants.EDGE_PADDING,
-                screen_y=GUIConstants.EDGE_PADDING - 1,  # Text can't perfectly vertically center relative to the button; shifting it down 1px looks better.
-                width=GUIConstants.TOP_NAV_BUTTON_SIZE,
-                height=GUIConstants.TOP_NAV_BUTTON_SIZE,
+                icon_size=GUIConstants.get_icon_size("inline"),
+                screen_x=edge_padding,
+                screen_y=edge_padding - GUIConstants.get_responsive_size(1),
+                width=button_size,
+                height=button_size,
             )
 
         if self.show_power_button:
             self.right_button = IconButton(
                 icon_name=SeedSignerIconConstants.POWER,
-                icon_size=GUIConstants.ICON_INLINE_FONT_SIZE,
-                screen_x=self.width - GUIConstants.TOP_NAV_BUTTON_SIZE - GUIConstants.EDGE_PADDING,
-                screen_y=GUIConstants.EDGE_PADDING,
-                width=GUIConstants.TOP_NAV_BUTTON_SIZE,
-                height=GUIConstants.TOP_NAV_BUTTON_SIZE,
+                icon_size=GUIConstants.get_icon_size("inline"),
+                screen_x=self.width - button_size - edge_padding,
+                screen_y=edge_padding,
+                width=button_size,
+                height=button_size,
             )
 
-        min_text_x = GUIConstants.EDGE_PADDING
+        min_text_x = edge_padding
         if self.show_back_button:
-            # Don't let the title intrude on the BACK button
-            min_text_x = self.left_button.screen_x + self.left_button.width + GUIConstants.COMPONENT_PADDING
+            min_text_x = self.left_button.screen_x + self.left_button.width + component_padding
 
         if self.icon_name:
-            # TODO: Refactor IconTextLine to use ScrollableTextLine
             self.title = IconTextLine(
                 screen_x=0,
                 screen_y=0,
                 height=self.height,
                 icon_name=self.icon_name,
                 icon_color=self.icon_color,
-                icon_size=GUIConstants.ICON_FONT_SIZE + 4,
+                icon_size=GUIConstants.get_icon_size("default") + GUIConstants.get_responsive_size(4),
                 value_text=self.text,
                 is_text_centered=True,
                 font_name=self.font_name,
@@ -1751,11 +1832,9 @@ class TopNav(BaseComponent):
                 is_text_centered=True,
                 font_name=self.font_name,
                 font_size=self.font_size,
-                height_ignores_below_baseline=True,  # Consistently vertically center text, ignoring chars that render below baseline (e.g. "pqyj")
+                height_ignores_below_baseline=True,
             )
             if self.title.needs_scroll:
-                # Add the scroll thread to TopNav's self.threads so it automatically runs
-                # for the life of the Component.
                 self.threads.append(self.title.scroll_thread)
 
 
@@ -1768,13 +1847,12 @@ class TopNav(BaseComponent):
             return RET_CODE__BACK_BUTTON
         if self.show_power_button:
             return RET_CODE__POWER_BUTTON
-
+        return None
 
     def render(self):
         self.title.render()
         self.render_buttons()
     
-
     def render_buttons(self):
         if self.show_back_button:
             self.left_button.is_selected = self.is_selected
@@ -1806,12 +1884,15 @@ def calc_bezier_curve(p1: Tuple[int,int], p2: Tuple[int,int], p3: Tuple[int,int]
         And then interpolate over the two line segments
         Q1 = (1 - t)*L1(t) + t*L2(t)
     """
-    t_step = 1.0 / segments
+    responsive_segments = max(segments, GUIConstants.get_responsive_size(segments))
+
+    t_step = 1.0 / responsive_segments
 
     points = [p1]
-    for i in range(1, segments + 1):
+    
+    for i in range(1, responsive_segments + 1):
         t = t_step * i
-        if i == segments:
+        if i == responsive_segments:
             points.append(p3)
             break
         l1_t = linear_interp(p1, p2, t)
@@ -1825,8 +1906,8 @@ def calc_bezier_curve(p1: Tuple[int,int], p2: Tuple[int,int], p3: Tuple[int,int]
 
 def reflow_text_for_width(text: str,
                           width: int,
-                          font_name=GUIConstants.get_body_font_name(),
-                          font_size=GUIConstants.get_body_font_size(),
+                          font_name=None,
+                          font_size=None,
                           allow_text_overflow: bool=False) -> list[dict]:
     """
     Reflows text to fit within `width` by breaking long lines up.
@@ -1836,12 +1917,13 @@ def reflow_text_for_width(text: str,
     Note: It is up to the calling code to handle any height considerations for the 
     resulting lines of text.
     """
-    # We have to figure out if and where to make line breaks in the text so that it
-    #   fits in its bounding rect (plus accounting for edge padding) using its given
-    #   font.
-    font = Fonts.get_font(font_name=font_name, size=font_size)
+    if font_name is None:
+        font_name = GUIConstants.get_body_font_name()
+    if font_size is None:
+        font_size = GUIConstants.get_body_font_size()
+    
     # Measure from left baseline ("ls")
-    (left, top, full_text_width, px_below_baseline) = font.getbbox(text, anchor="ls")
+    (left, top, full_text_width, px_below_baseline) = Fonts.get_font(font_name, font_size).getbbox(text, anchor="ls")
 
     if not ImageFont.core.HAVE_RAQM:
         # Fudge factor for imprecise width calcs w/out libraqm
@@ -1877,7 +1959,7 @@ def reflow_text_for_width(text: str,
                 index = 1
 
             # Measure rendered width from "left" anchor (anchor="l_")
-            (left, top, right, px_below_baseline) = font.getbbox(word_spacer.join(words[0:index]), anchor="ls")
+            (left, top, right, px_below_baseline) = Fonts.get_font(font_name, font_size).getbbox(word_spacer.join(words[0:index]), anchor="ls")
             line_width = right - left
 
             if not ImageFont.core.HAVE_RAQM:
@@ -1944,17 +2026,20 @@ def reflow_text_for_width(text: str,
 def reflow_text_into_pages(text: str,
                            width: int,
                            height: int,
-                           font_name=GUIConstants.get_body_font_name(),
-                           font_size=GUIConstants.get_body_font_size(),
-                           line_spacer: int = GUIConstants.BODY_LINE_SPACING,
+                           font_name=None,
+                           font_size=None,
+                           line_spacer: int = None,
                            allow_text_overflow: bool=False) -> list[str]:
     """
-    Invokes `reflow_text_for_width` above to convert long text into width-limited
-    individual text lines and then calculates how many lines will fit on a "page" and
-    groups the output accordingly.
-
-    Returns a list of strings where each string is a page's worth of line-breaked text.
+    Invokes `reflow_text_for_width` with responsive defaults.
     """
+    if font_name is None:
+        font_name = GUIConstants.get_body_font_name()
+    if font_size is None:
+        font_size = GUIConstants.get_body_font_size()
+    if line_spacer is None:
+        line_spacer = GUIConstants.get_line_spacing()
+    
     reflowed_lines_dicts = reflow_text_for_width(text=text,
                                            width=width,
                                            font_name=font_name,
