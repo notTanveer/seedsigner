@@ -664,18 +664,33 @@ class SeedBackupView(View):
 class SeedExportXpubSigTypeView(View):
     SINGLE_SIG = ButtonOption("Single Sig", return_data=SettingsConstants.SINGLE_SIG)
     MULTISIG = ButtonOption("Multisig", return_data=SettingsConstants.MULTISIG)
+    SILENT_PAYMENT = ButtonOption("Silent Payment", return_data=SettingsConstants.SILENT_PAYMENT)
 
     def __init__(self, seed_num: int):
         super().__init__()
         self.seed_num = seed_num
 
 
-    def run(self):
-        if len(self.settings.get_value(SettingsConstants.SETTING__SIG_TYPES)) == 1:
-            # Nothing to select; skip this screen
-            return Destination(SeedExportXpubScriptTypeView, view_args={"seed_num": self.seed_num, "sig_type": self.settings.get_value(SettingsConstants.SETTING__SIG_TYPES)[0]}, skip_current_view=True)
+    def _sp_enabled(self) -> bool:
+        return self.settings.get_value(SettingsConstants.SETTING__SILENT_PAYMENTS) != SettingsConstants.OPTION__DISABLED
 
-        button_data = [self.SINGLE_SIG, self.MULTISIG]
+
+    def run(self):
+        available_sig_types = self.settings.get_value(SettingsConstants.SETTING__SIG_TYPES)
+        button_data = []
+        if SettingsConstants.SINGLE_SIG in available_sig_types:
+            button_data.append(self.SINGLE_SIG)
+        if SettingsConstants.MULTISIG in available_sig_types:
+            button_data.append(self.MULTISIG)
+        if self._sp_enabled():
+            button_data.append(self.SILENT_PAYMENT)
+
+        if len(button_data) == 1:
+            # Only one policy available — skip this screen
+            sig_type = button_data[0].return_data
+            if sig_type == SettingsConstants.SILENT_PAYMENT:
+                return Destination(SeedSPAddressExportView, view_args={"seed_num": self.seed_num}, skip_current_view=True)
+            return Destination(SeedExportXpubScriptTypeView, view_args={"seed_num": self.seed_num, "sig_type": sig_type}, skip_current_view=True)
 
         selected_menu_num = self.run_screen(
             ButtonListScreen,
@@ -686,7 +701,11 @@ class SeedExportXpubSigTypeView(View):
         if selected_menu_num == RET_CODE__BACK_BUTTON:
             return Destination(BackStackView)
 
-        return Destination(SeedExportXpubScriptTypeView, view_args={"seed_num": self.seed_num, "sig_type": button_data[selected_menu_num].return_data})
+        selected_sig_type = button_data[selected_menu_num].return_data
+        if selected_sig_type == SettingsConstants.SILENT_PAYMENT:
+            return Destination(SeedSPAddressExportView, view_args={"seed_num": self.seed_num})
+
+        return Destination(SeedExportXpubScriptTypeView, view_args={"seed_num": self.seed_num, "sig_type": selected_sig_type})
 
 
 
@@ -749,9 +768,6 @@ class SeedExportXpubScriptTypeView(View):
 
             if args["script_type"] == SettingsConstants.CUSTOM_DERIVATION:
                 return Destination(SeedExportXpubCustomDerivationView, view_args=args)
-
-            if args["script_type"] == SettingsConstants.SILENT_PAYMENT:
-                return Destination(SeedSPAddressExportView, view_args={"seed_num": args["seed_num"]})
 
             if self.controller.resume_main_flow == Controller.FLOW__ADDRESS_EXPLORER:
                 del args["sig_type"]

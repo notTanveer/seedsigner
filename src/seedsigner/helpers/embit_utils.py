@@ -30,6 +30,10 @@ def get_standard_derivation_path(network: str = SettingsConstants.MAINNET, walle
     else:
         raise Exception("Unexpected network")
 
+    # SP is a policy type, not a script type — derivation is independent of script_type
+    if wallet_type == SettingsConstants.SILENT_PAYMENT:
+        return f"m/352'/{network_path}/0'"
+
     if wallet_type == SettingsConstants.SINGLE_SIG:
         if script_type == SettingsConstants.LEGACY_P2PKH:
             return f"m/44'/{network_path}/0'"
@@ -39,8 +43,6 @@ def get_standard_derivation_path(network: str = SettingsConstants.MAINNET, walle
             return f"m/84'/{network_path}/0'"
         elif script_type == SettingsConstants.TAPROOT:
             return f"m/86'/{network_path}/0'"
-        elif script_type == SettingsConstants.SILENT_PAYMENT:
-            return f"m/352'/{network_path}/0'"
         else:
             raise Exception("Unexpected script type")
 

@@ -164,23 +164,53 @@ class Seed:
         return bip85.derive_mnemonic(root, bip85_num_words, bip85_index)
 
 
-    def get_sp_keys(self, network: str = SettingsConstants.MAINNET):
-        """Derive BIP-352 scan privkey and spend pubkey from seed."""
+    def _build_bip352_path(self, is_scan_key: bool = True, account: int = 0, network: str = SettingsConstants.MAINNET) -> str:
+        """Build a BIP-352 derivation path: m/352'/{coin}'/{account}'/{key_type}'/0"""
+        coin_type = 0 if network == SettingsConstants.MAINNET else 1
+        key_type = 1 if is_scan_key else 0  # 1' = scan key, 0' = spend key
+        return f"m/352'/{coin_type}'/{account}'/{key_type}'/0"
+
+
+    def get_bip352_scan_derivation_path(self, account: int = 0, network: str = SettingsConstants.MAINNET) -> str:
+        return self._build_bip352_path(is_scan_key=True, account=account, network=network)
+
+
+    def get_bip352_spend_derivation_path(self, account: int = 0, network: str = SettingsConstants.MAINNET) -> str:
+        return self._build_bip352_path(is_scan_key=False, account=account, network=network)
+
+
+    def derive_bip352_scan_privkey(self, account: int = 0, network: str = SettingsConstants.MAINNET):
+        """Return the BIP-352 scan private key."""
         embit_network = SettingsConstants.map_network_to_embit(network)
         root = bip32.HDKey.from_seed(self.seed_bytes, version=NETWORKS[embit_network]["xprv"])
-        coin_type = "0'" if network == SettingsConstants.MAINNET else "1'"
-        scan_privkey = root.derive(f"m/352'/{coin_type}/0'/1'/0").key
-        spend_privkey = root.derive(f"m/352'/{coin_type}/0'/0'/0").key
-        spend_pubkey = spend_privkey.get_public_key()
+        return root.derive(self.get_bip352_scan_derivation_path(account=account, network=network)).key
+
+
+    def derive_bip352_spend_privkey(self, account: int = 0, network: str = SettingsConstants.MAINNET):
+        """Return the BIP-352 spend private key."""
+        embit_network = SettingsConstants.map_network_to_embit(network)
+        root = bip32.HDKey.from_seed(self.seed_bytes, version=NETWORKS[embit_network]["xprv"])
+        return root.derive(self.get_bip352_spend_derivation_path(account=account, network=network)).key
+
+
+    def generate_bip352_silent_payment_address(self, label: "int | None" = None, account: int = 0, network: str = SettingsConstants.MAINNET) -> str:
+        """Generate a BIP-352 Silent Payment address, with optional integer label."""
+        from embit.silent_payments.bip352 import generate_silent_payment_address
+        scan_privkey = self.derive_bip352_scan_privkey(account=account, network=network)
+        spend_pubkey = self.derive_bip352_spend_privkey(account=account, network=network).get_public_key()
+        embit_network = SettingsConstants.map_network_to_embit(network)
+        return generate_silent_payment_address(scan_privkey, spend_pubkey, label=label, network=embit_network)
+
+
+    # Convenience aliases used by PSBTParser
+    def get_sp_keys(self, network: str = SettingsConstants.MAINNET):
+        scan_privkey = self.derive_bip352_scan_privkey(network=network)
+        spend_pubkey = self.derive_bip352_spend_privkey(network=network).get_public_key()
         return scan_privkey, spend_pubkey
 
 
     def get_sp_address(self, network: str = SettingsConstants.MAINNET) -> str:
-        """Generate BIP-352 Silent Payment address."""
-        from embit.silent_payments.bip352 import generate_silent_payment_address
-        scan_privkey, spend_pubkey = self.get_sp_keys(network)
-        embit_network = SettingsConstants.map_network_to_embit(network)
-        return generate_silent_payment_address(scan_privkey, spend_pubkey, network=embit_network)
+        return self.generate_bip352_silent_payment_address(network=network)
         
 
     ### override operators    
