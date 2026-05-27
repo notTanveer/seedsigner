@@ -39,6 +39,8 @@ def get_standard_derivation_path(network: str = SettingsConstants.MAINNET, walle
             return f"m/84'/{network_path}/0'"
         elif script_type == SettingsConstants.TAPROOT:
             return f"m/86'/{network_path}/0'"
+        elif script_type == SettingsConstants.SILENT_PAYMENT:
+            return f"m/352'/{network_path}/0'"
         else:
             raise Exception("Unexpected script type")
 

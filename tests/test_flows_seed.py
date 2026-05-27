@@ -220,9 +220,9 @@ class TestSeedFlows(FlowTest):
         for sig_tuple in sig_types:
             for script_tuple in script_types:
                 for xpub_qr_tuple in xpub_qr_formats:
-                    # skip custom derivation
-                    if script_tuple[0] == SettingsConstants.CUSTOM_DERIVATION:
-                        continue 
+                    # skip custom derivation and silent payment (separate flows)
+                    if script_tuple[0] in (SettingsConstants.CUSTOM_DERIVATION, SettingsConstants.SILENT_PAYMENT):
+                        continue
                     # skip multisig taproot
                     elif sig_tuple[0] == SettingsConstants.MULTISIG and script_tuple[0] == SettingsConstants.TAPROOT:
                         continue

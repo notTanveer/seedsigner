@@ -162,6 +162,25 @@ class Seed:
 
         # TODO: Support other BIP-39 wordlist languages!
         return bip85.derive_mnemonic(root, bip85_num_words, bip85_index)
+
+
+    def get_sp_keys(self, network: str = SettingsConstants.MAINNET):
+        """Derive BIP-352 scan privkey and spend pubkey from seed."""
+        embit_network = SettingsConstants.map_network_to_embit(network)
+        root = bip32.HDKey.from_seed(self.seed_bytes, version=NETWORKS[embit_network]["xprv"])
+        coin_type = "0'" if network == SettingsConstants.MAINNET else "1'"
+        scan_privkey = root.derive(f"m/352'/{coin_type}/0'/1'/0").key
+        spend_privkey = root.derive(f"m/352'/{coin_type}/0'/0'/0").key
+        spend_pubkey = spend_privkey.get_public_key()
+        return scan_privkey, spend_pubkey
+
+
+    def get_sp_address(self, network: str = SettingsConstants.MAINNET) -> str:
+        """Generate BIP-352 Silent Payment address."""
+        from embit.silent_payments.bip352 import generate_silent_payment_address
+        scan_privkey, spend_pubkey = self.get_sp_keys(network)
+        embit_network = SettingsConstants.map_network_to_embit(network)
+        return generate_silent_payment_address(scan_privkey, spend_pubkey, network=embit_network)
         
 
     ### override operators    

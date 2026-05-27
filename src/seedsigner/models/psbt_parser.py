@@ -8,6 +8,12 @@ from embit.ec import PublicKey
 from io import BytesIO
 from typing import List
 
+try:
+    from embit.silent_payments.psbt import SPOutputScope
+    _SP_AVAILABLE = True
+except ImportError:
+    _SP_AVAILABLE = False
+
 from seedsigner.models.seed import Seed
 from seedsigner.models.settings import SettingsConstants
 
@@ -65,6 +71,23 @@ class PSBTParser():
         return len(self.destination_addresses)
 
 
+    @property
+    def has_sp_outputs(self) -> bool:
+        if not _SP_AVAILABLE:
+            return False
+        return any(getattr(out, "sp_data", None) is not None for out in self.psbt.outputs)
+
+
+    def _get_sp_address(self, out) -> str:
+        from embit.silent_payments.bip352 import generate_silent_payment_address, decode_silent_payment_address
+        from embit import bech32
+        sp_data = out.sp_data
+        payload = sp_data.scan_key.sec() + sp_data.spend_key.sec()
+        data = bech32.convertbits(payload, 8, 5)
+        hrp = "sp" if self.network == SettingsConstants.MAINNET else "tsp"
+        return bech32.bech32_encode(bech32.Encoding.BECH32M, hrp, [0] + data)
+
+
     def _set_root(self):
         self.root = bip32.HDKey.from_seed(self.seed.seed_bytes, version=NETWORKS[SettingsConstants.map_network_to_embit(self.network)]["xprv"])
 
@@ -120,6 +143,14 @@ class PSBTParser():
         self.destination_addresses = []
         self.destination_amounts = []
         for i, out in enumerate(self.psbt.outputs):
+            # SP outputs have no script_pubkey yet and are never change
+            if _SP_AVAILABLE and getattr(out, "sp_data", None) is not None:
+                sp_addr = self._get_sp_address(out)
+                self.destination_addresses.append(sp_addr)
+                self.destination_amounts.append(self.psbt.tx.vout[i].value)
+                self.spend_amount += self.psbt.tx.vout[i].value
+                continue
+
             out_policy = PSBTParser._get_policy(out, self.psbt.tx.vout[i].script_pubkey, self.psbt.xpubs)
             is_change = False
 
@@ -227,6 +258,32 @@ class PSBTParser():
         return True
 
 
+    def sign_sp(self, aux_rand: bytes = None):
+        """SP-aware signing: clear untrusted fields, populate ECDH+DLEQ, derive output scripts, validate, sign."""
+        if not _SP_AVAILABLE:
+            raise RuntimeError("Silent Payments support requires the embit fork with silent_payments")
+        from embit.silent_payments import populate_silent_payment_send_data
+        from embit.silent_payments.validator import BIP375Validator
+
+        # Clear any untrusted incoming SP fields
+        for attr in ("sp_ecdh_shares", "sp_dleq_proofs"):
+            if hasattr(self.psbt, attr):
+                getattr(self.psbt, attr).clear()
+        for inp in self.psbt.inputs:
+            for attr in ("sp_ecdh_shares", "sp_dleq_proofs"):
+                if hasattr(inp, attr):
+                    getattr(inp, attr).clear()
+
+        # Populate fresh ECDH shares + DLEQ proofs
+        populate_silent_payment_send_data(self.psbt, self.root, aux_rand=aux_rand)
+
+        # Validate BIP-375
+        BIP375Validator(self.psbt).validate(skip_output_scripts=False)
+
+        # Sign normally
+        self.psbt.sign_with(self.root)
+
+
     @staticmethod
     def trim(tx):
         trimmed_psbt = psbt.PSBT(tx.tx)
@@ -238,6 +295,21 @@ class PSBTParser():
                 trimmed_psbt.inputs[i].final_scriptwitness = inp.final_scriptwitness
             else:
                 trimmed_psbt.inputs[i].partial_sigs = inp.partial_sigs
+
+        # Preserve SP fields if present
+        if _SP_AVAILABLE:
+            for attr in ("sp_ecdh_shares", "sp_dleq_proofs"):
+                if hasattr(tx, attr) and getattr(tx, attr):
+                    setattr(trimmed_psbt, attr, getattr(tx, attr))
+            for i, inp in enumerate(tx.inputs):
+                for attr in ("sp_ecdh_shares", "sp_dleq_proofs"):
+                    if hasattr(inp, attr) and getattr(inp, attr):
+                        setattr(trimmed_psbt.inputs[i], attr, getattr(inp, attr))
+            for i, out in enumerate(tx.outputs):
+                if getattr(out, "sp_data", None) is not None:
+                    trimmed_psbt.outputs[i].sp_data = out.sp_data
+                if getattr(out, "sp_label", None) is not None:
+                    trimmed_psbt.outputs[i].sp_label = out.sp_label
 
         return trimmed_psbt
 

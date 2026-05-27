@@ -540,15 +540,22 @@ class PSBTFinalizeView(View):
         else:
             # Sign PSBT
             sig_cnt = PSBTParser.sig_count(psbt)
-            psbt.sign_with(psbt_parser.root)
-            trimmed_psbt = PSBTParser.trim(psbt)
+
+            if psbt_parser.has_sp_outputs:
+                import os
+                aux_rand = os.urandom(32)
+                psbt_parser.sign_sp(aux_rand=aux_rand)
+                trimmed_psbt = PSBTParser.trim(psbt)
+            else:
+                psbt.sign_with(psbt_parser.root)
+                trimmed_psbt = PSBTParser.trim(psbt)
 
             if sig_cnt == PSBTParser.sig_count(trimmed_psbt):
                 # Signing failed / didn't do anything
                 # TODO: Reserved for Nick. Are there different failure scenarios that we can detect?
                 # Would be nice to alter the message on the next screen w/more detail.
                 return Destination(PSBTSigningErrorView)
-            
+
             else:
                 self.controller.psbt = trimmed_psbt
                 return Destination(PSBTSignedQRDisplayView)

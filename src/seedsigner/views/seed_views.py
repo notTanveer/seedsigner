@@ -750,6 +750,9 @@ class SeedExportXpubScriptTypeView(View):
             if args["script_type"] == SettingsConstants.CUSTOM_DERIVATION:
                 return Destination(SeedExportXpubCustomDerivationView, view_args=args)
 
+            if args["script_type"] == SettingsConstants.SILENT_PAYMENT:
+                return Destination(SeedSPAddressExportView, view_args={"seed_num": args["seed_num"]})
+
             if self.controller.resume_main_flow == Controller.FLOW__ADDRESS_EXPLORER:
                 del args["sig_type"]
                 return Destination(ToolsAddressExplorerAddressTypeView, view_args=args)
@@ -793,6 +796,29 @@ class SeedExportXpubCustomDerivationView(View):
                 "custom_derivation": custom_derivation,
             }
         )
+
+
+
+class SeedSPAddressExportView(View):
+    """Display and export the BIP-352 Silent Payment address for a seed."""
+    def __init__(self, seed_num: int):
+        super().__init__()
+        self.seed_num = seed_num
+
+    def run(self):
+        from seedsigner.gui.screens.screen import QRDisplayScreen
+        seed = self.controller.get_seed(self.seed_num)
+        network = self.settings.get_value(SettingsConstants.SETTING__NETWORK)
+        sp_address = seed.get_sp_address(network=network)
+
+        self.run_screen(
+            QRDisplayScreen,
+            qr_encoder=GenericStaticQrEncoder(
+                data=sp_address,
+                qr_density=self.settings.get_value(SettingsConstants.SETTING__QR_DENSITY),
+            ),
+        )
+        return Destination(MainMenuView, clear_history=True)
 
 
 

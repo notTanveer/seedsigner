@@ -287,12 +287,14 @@ class SettingsConstants:
     NATIVE_SEGWIT = "nat"
     NESTED_SEGWIT = "nes"
     TAPROOT = "tr"
+    SILENT_PAYMENT = "sp"
     CUSTOM_DERIVATION = "cus"
     ALL_SCRIPT_TYPES = [
         (NATIVE_SEGWIT, _mft("Native Segwit")),
         (NESTED_SEGWIT, _mft("Nested Segwit")),
         (LEGACY_P2PKH, _mft("Legacy")),
         (TAPROOT, _mft("Taproot")),
+        (SILENT_PAYMENT, _mft("Silent Payment")),
         (CUSTOM_DERIVATION, _mft("Custom Derivation")),
     ]
 
@@ -353,6 +355,8 @@ class SettingsConstants:
     SETTING__QR_BRIGHTNESS_TIPS = "qr_brightness_tips"
     SETTING__PARTNER_LOGOS = "partner_logos"
     SETTING__MICROSD_TOAST_TIMER = "microsd_toast_timer"
+
+    SETTING__SILENT_PAYMENTS = "silent_payments"
 
     SETTING__DEBUG = "debug"
 
@@ -672,6 +676,14 @@ class SettingsDefinition:
                       abbreviated_name="electrum",
                       display_name=_mft("Electrum seeds"),
                       help_text=_mft("Native Segwit only"),
+                      visibility=SettingsConstants.VISIBILITY__ADVANCED,
+                      default_value=SettingsConstants.OPTION__DISABLED),
+
+        SettingsEntry(category=SettingsConstants.CATEGORY__FEATURES,
+                      attr_name=SettingsConstants.SETTING__SILENT_PAYMENTS,
+                      abbreviated_name="sp",
+                      display_name=_mft("Silent Payments"),
+                      help_text=_mft("BIP-352 Silent Payments"),
                       visibility=SettingsConstants.VISIBILITY__ADVANCED,
                       default_value=SettingsConstants.OPTION__DISABLED),
         

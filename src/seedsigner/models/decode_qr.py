@@ -518,6 +518,9 @@ class DecodeQR:
             return True
         elif re.search(r'^((bc1|tb1|bcr|[123]|[mn])[a-zA-HJ-NP-Z0-9]{25,62})$', s, re.IGNORECASE):
             return True
+        elif re.search(r'^(sp1|tsp1)[a-z0-9]{25,200}$', s, re.IGNORECASE):
+            # Silent Payment address (BIP-352): sp1... or tsp1... bech32m, up to ~117 chars
+            return True
         else:
             return False
 
