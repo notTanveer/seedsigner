@@ -100,9 +100,10 @@ def get_psbt_cls():
         return PSBT
 ```
 
-Every site that constructs or parses a PSBT imports the class from this one place. This
-replaces the stray `_SP_AVAILABLE` flag in `psbt_parser.py` with a single source of truth,
-is trivially mockable in tests, and matches SeedSigner's `helpers/` convention.
+The PSBT **parse** sites in `decode_qr.py` import the class from this one place (so SP
+fields survive parsing). This replaces the stray `_SP_AVAILABLE` flag in `psbt_parser.py`
+with a single source of truth, is trivially mockable in tests, and matches SeedSigner's
+`helpers/` convention. (`trim()` does not need it — see its entry below.)
 
 Rejected alternative (Approach A): direct `SilentPaymentsPSBT` substitution with a
 `try/except` guard repeated at each call site. Simpler per-site, but scatters the
@@ -163,9 +164,13 @@ policy gating is added on the send path.
   PSBT is parsed as `SilentPaymentsPSBT`). Gate `has_sp_outputs` on
   `getattr(out, "sp_data", None)` so it is safe when SP is unavailable.
 - Keep `_get_sp_address()` (manual bech32m encode of `sp_data.scan_key` + `sp_data.spend_key`).
-- **Fix `trim()`:** construct the trimmed PSBT via `get_psbt_cls()`. Preserve the fields a
-  BIP-375 coordinator needs back: per-input `sp_ecdh_shares` / `sp_dleq_proofs`, and output
-  `sp_data` / `sp_label`. Do **not** attempt to derive or fill output scripts.
+- **Fix `trim()`:** SP PSBTs are version 2 and carry ECDH shares / DLEQ proofs; the existing
+  rebuild-from-`tx.tx` path produces a **v0** PSBT, and SP fields only serialize for v2 — so
+  that path silently drops them. Therefore: when any output has `sp_data`, `trim()` returns
+  the signed PSBT **unchanged** (preserving v2 structure, per-input `sp_ecdh_shares` /
+  `sp_dleq_proofs`, and output `sp_data` / `sp_label`); aggressive size-trimming for SP is
+  deferred. The non-SP path is unchanged. Do **not** derive or fill output scripts. (No
+  `get_psbt_cls()` needed here — only the `decode_qr` parse sites use it.)
 
 ### `views/psbt_views.py` — `PSBTFinalizeView.run()`
 - Remove the `if psbt_parser.has_sp_outputs:` branch and the `import os` / `os.urandom(32)`
