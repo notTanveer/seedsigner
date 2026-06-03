@@ -664,7 +664,7 @@ class SeedBackupView(View):
 class SeedExportXpubSigTypeView(View):
     SINGLE_SIG = ButtonOption("Single Sig", return_data=SettingsConstants.SINGLE_SIG)
     MULTISIG = ButtonOption("Multisig", return_data=SettingsConstants.MULTISIG)
-    SILENT_PAYMENT = ButtonOption("Silent Payment", return_data=SettingsConstants.SILENT_PAYMENT)
+    SILENT_PAYMENT = ButtonOption("Single-Sig SP", return_data=SettingsConstants.SILENT_PAYMENT)
 
     def __init__(self, seed_num: int):
         super().__init__()

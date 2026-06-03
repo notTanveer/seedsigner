@@ -494,6 +494,37 @@ class TestSeedFlows(FlowTest):
         assert self.controller.is_screensaver_start_allowed == False
 
 
+    def test_sp_export_button_label_is_single_sig_sp(self):
+        from seedsigner.views.seed_views import SeedExportXpubSigTypeView
+        assert SeedExportXpubSigTypeView.SILENT_PAYMENT.button_label == "Single-Sig SP"
+
+    def test_single_sig_sp_export_flow(self):
+        """With Silent Payments enabled, the export flow offers 'Single-Sig SP'
+        and routes straight to the SP address export (no script-type screen).
+
+        Note: `view_args` for the first View are passed via
+        `run_sequence(initial_destination_view_args=...)`; `FlowStep` itself has
+        no `view_args` parameter."""
+        from seedsigner.views.seed_views import SeedExportXpubSigTypeView, SeedSPAddressExportView
+
+        mnemonic = "blush twice taste dawn feed second opinion lazy thumb play neglect impact".split()
+        self.controller.storage.set_pending_seed(Seed(mnemonic=mnemonic))
+        self.controller.storage.finalize_pending_seed()
+
+        # Enable single-sig + Silent Payments so both buttons show (no auto-skip).
+        self.settings.set_value(SettingsConstants.SETTING__SIG_TYPES, [SettingsConstants.SINGLE_SIG])
+        self.settings.set_value(SettingsConstants.SETTING__SILENT_PAYMENTS, SettingsConstants.OPTION__ENABLED)
+
+        self.run_sequence(
+            sequence=[
+                FlowStep(SeedExportXpubSigTypeView,
+                         button_data_selection=SeedExportXpubSigTypeView.SILENT_PAYMENT),
+                FlowStep(SeedSPAddressExportView),
+            ],
+            initial_destination_view_args={"seed_num": 0},
+        )
+
+
 
 class TestMessageSigningFlows(FlowTest):
     MAINNET_DERIVATION_PATH = "m/84h/0h/0h/0/0"
@@ -748,5 +779,3 @@ class TestMessageSigningFlows(FlowTest):
 
         self.settings.set_value(SettingsConstants.SETTING__NETWORK, SettingsConstants.MAINNET)
         expect_unsupported_derivation(self.load_custom_derivation_into_decoder)
-
-
