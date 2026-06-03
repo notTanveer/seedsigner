@@ -664,6 +664,7 @@ class SeedBackupView(View):
 class SeedExportXpubSigTypeView(View):
     SINGLE_SIG = ButtonOption("Single Sig", return_data=SettingsConstants.SINGLE_SIG)
     MULTISIG = ButtonOption("Multisig", return_data=SettingsConstants.MULTISIG)
+    # TRANSLATOR_NOTE: Policy option label; "SP" abbreviates "Silent Payments" (BIP-352). Single-signature Silent Payments.
     SILENT_PAYMENT = ButtonOption("Single-Sig SP", return_data=SettingsConstants.SILENT_PAYMENT)
 
     def __init__(self, seed_num: int):
