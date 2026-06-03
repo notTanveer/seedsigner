@@ -19,6 +19,21 @@ from seedsigner.models.settings_definition import SettingsConstants
 # TODO: PR these directly into `embit`? Or replace with new/existing methods already in `embit`?
 
 
+def get_psbt_cls():
+    """Return the PSBT class to use for parsing and constructing PSBTs.
+
+    Prefers the SP-aware `SilentPaymentsPSBT` — a drop-in superset of embit's
+    `PSBT` — so BIP-352 Silent Payment fields survive parse -> sign -> serialize.
+    Falls back to vanilla `PSBT` if the installed embit lacks `silent_payments`.
+    """
+    try:
+        from embit.silent_payments import SilentPaymentsPSBT
+        return SilentPaymentsPSBT
+    except ImportError:
+        from embit.psbt import PSBT
+        return PSBT
+
+
 # TODO: Refactor `wallet_type` to conform to our `sig_type` naming convention
 def get_standard_derivation_path(network: str = SettingsConstants.MAINNET, wallet_type: str = SettingsConstants.SINGLE_SIG, script_type: str = SettingsConstants.NATIVE_SEGWIT) -> str:
     if network == SettingsConstants.MAINNET:
