@@ -202,13 +202,6 @@ class Seed:
         return generate_silent_payment_address(scan_privkey, spend_pubkey, label=label, network=embit_network)
 
 
-    # Convenience aliases used by PSBTParser
-    def get_sp_keys(self, network: str = SettingsConstants.MAINNET):
-        scan_privkey = self.derive_bip352_scan_privkey(network=network)
-        spend_pubkey = self.derive_bip352_spend_privkey(network=network).get_public_key()
-        return scan_privkey, spend_pubkey
-
-
     def get_sp_address(self, network: str = SettingsConstants.MAINNET) -> str:
         return self.generate_bip352_silent_payment_address(network=network)
         

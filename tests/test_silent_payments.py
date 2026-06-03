@@ -155,3 +155,14 @@ class TestFinalizeViewSpSigning(BaseTest):
         # Controller now holds a signed, SP-preserving PSBT.
         assert PSBTParser.sig_count(self.controller.psbt) >= 1
         assert any(getattr(out, "sp_data", None) is not None for out in self.controller.psbt.outputs)
+
+
+class TestSeedSpDerivation(BaseTest):
+    def test_get_sp_address_mainnet_and_regtest(self):
+        addr_main = SENDER_SEED.get_sp_address(network=SettingsConstants.MAINNET)
+        addr_regtest = SENDER_SEED.get_sp_address(network=SettingsConstants.REGTEST)
+        assert addr_main.startswith("sp1")
+        assert addr_regtest.startswith("tsp1")
+
+    def test_get_sp_keys_is_removed(self):
+        assert not hasattr(SENDER_SEED, "get_sp_keys")
