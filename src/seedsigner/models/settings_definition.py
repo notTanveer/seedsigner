@@ -13,7 +13,6 @@ logger = logging.getLogger(__name__)
 class SettingsConstants:
     # Basic defaults
     OPTION__ENABLED = "E"
-    OPTION__ENABLED_WITH_LABELS = "L"
     OPTION__DISABLED = "D"
     OPTION__PROMPT = "P"
     OPTION__REQUIRED = "R"
@@ -299,11 +298,6 @@ class SettingsConstants:
 
     # Silent Payments is a separate policy type, not a script type
     SILENT_PAYMENT = "sp"
-    OPTIONS__SILENT_PAYMENTS = [
-        (OPTION__ENABLED, _mft("Enabled")),
-        (OPTION__ENABLED_WITH_LABELS, _mft("Enabled with labels")),
-        (OPTION__DISABLED, _mft("Disabled")),
-    ]
 
     MICROSD_TOAST_TIMER_DISABLED = "D"
     MICROSD_TOAST_TIMER_FIVE_SECONDS = "E"
@@ -691,9 +685,7 @@ class SettingsDefinition:
                       abbreviated_name="sp",
                       display_name=_mft("Silent Payments"),
                       help_text=_mft("BIP-352 Silent Payments"),
-                      type=SettingsConstants.TYPE__SELECT_1,
                       visibility=SettingsConstants.VISIBILITY__ADVANCED,
-                      selection_options=SettingsConstants.OPTIONS__SILENT_PAYMENTS,
                       default_value=SettingsConstants.OPTION__DISABLED),
         
         SettingsEntry(category=SettingsConstants.CATEGORY__FEATURES,

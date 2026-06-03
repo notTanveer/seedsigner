@@ -166,3 +166,19 @@ class TestSeedSpDerivation(BaseTest):
 
     def test_get_sp_keys_is_removed(self):
         assert not hasattr(SENDER_SEED, "get_sp_keys")
+
+
+class TestSilentPaymentsSetting(BaseTest):
+    def test_sp_setting_is_enabled_disabled_toggle(self):
+        from seedsigner.models.settings_definition import SettingsConstants, SettingsDefinition
+
+        entry = SettingsDefinition.get_settings_entry(SettingsConstants.SETTING__SILENT_PAYMENTS)
+        assert entry.type == SettingsConstants.TYPE__ENABLED_DISABLED
+        assert entry.selection_options == SettingsConstants.OPTIONS__ENABLED_DISABLED
+        assert entry.default_value == SettingsConstants.OPTION__DISABLED
+
+    def test_enabled_with_labels_option_removed(self):
+        from seedsigner.models.settings_definition import SettingsConstants
+
+        assert not hasattr(SettingsConstants, "OPTION__ENABLED_WITH_LABELS")
+        assert not hasattr(SettingsConstants, "OPTIONS__SILENT_PAYMENTS")
