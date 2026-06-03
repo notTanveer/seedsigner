@@ -250,32 +250,15 @@ class PSBTParser():
         return True
 
 
-    def sign_sp(self, aux_rand: bytes = None):
-        """SP-aware signing: clear untrusted fields, populate ECDH+DLEQ, derive output scripts, validate, sign."""
-        from embit.silent_payments import populate_silent_payment_send_data
-        from embit.silent_payments.validator import BIP375Validator
-
-        # Clear any untrusted incoming SP fields
-        for attr in ("sp_ecdh_shares", "sp_dleq_proofs"):
-            if hasattr(self.psbt, attr):
-                getattr(self.psbt, attr).clear()
-        for inp in self.psbt.inputs:
-            for attr in ("sp_ecdh_shares", "sp_dleq_proofs"):
-                if hasattr(inp, attr):
-                    getattr(inp, attr).clear()
-
-        # Populate fresh ECDH shares + DLEQ proofs
-        populate_silent_payment_send_data(self.psbt, self.root, aux_rand=aux_rand)
-
-        # Validate BIP-375
-        BIP375Validator(self.psbt).validate(skip_output_scripts=False)
-
-        # Sign normally
-        self.psbt.sign_with(self.root)
-
-
     @staticmethod
     def trim(tx):
+        # Silent Payment (BIP-375) PSBTs are version 2 and carry per-input ECDH shares /
+        # DLEQ proofs plus output sp_data. The standard rebuild-from-tx trim below produces
+        # a v0 PSBT, and SP fields only serialize for v2 — so it would silently drop them.
+        # Return the signed PSBT intact for SP; size-optimized SP trimming is deferred.
+        if any(getattr(out, "sp_data", None) is not None for out in tx.outputs):
+            return tx
+
         trimmed_psbt = psbt.PSBT(tx.tx)
         for i, inp in enumerate(tx.inputs):
             if inp.final_scriptwitness:
@@ -285,20 +268,6 @@ class PSBTParser():
                 trimmed_psbt.inputs[i].final_scriptwitness = inp.final_scriptwitness
             else:
                 trimmed_psbt.inputs[i].partial_sigs = inp.partial_sigs
-
-        # Preserve SP fields if present
-        for attr in ("sp_ecdh_shares", "sp_dleq_proofs"):
-            if hasattr(tx, attr) and getattr(tx, attr):
-                setattr(trimmed_psbt, attr, getattr(tx, attr))
-        for i, inp in enumerate(tx.inputs):
-            for attr in ("sp_ecdh_shares", "sp_dleq_proofs"):
-                if hasattr(inp, attr) and getattr(inp, attr):
-                    setattr(trimmed_psbt.inputs[i], attr, getattr(inp, attr))
-        for i, out in enumerate(tx.outputs):
-            if getattr(out, "sp_data", None) is not None:
-                trimmed_psbt.outputs[i].sp_data = out.sp_data
-            if getattr(out, "sp_label", None) is not None:
-                trimmed_psbt.outputs[i].sp_label = out.sp_label
 
         return trimmed_psbt
 

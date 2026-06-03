@@ -92,3 +92,43 @@ class TestPsbtParserSpReadSide(BaseTest):
         assert parser.destination_addresses[0] == RECIPIENT_SEED.get_sp_address(network=network)
         assert parser.destination_amounts[0] == 99_000
         assert parser.spend_amount == 99_000
+
+
+class TestPsbtParserSpSignAndTrim(BaseTest):
+    def _root_for(self, seed, network):
+        return _root(seed, network)
+
+    def test_sign_with_populates_sp_fields_and_sig(self):
+        from seedsigner.models.psbt_parser import PSBTParser
+
+        network = SettingsConstants.REGTEST
+        psbt = build_sp_psbt(network=network)
+        root = self._root_for(SENDER_SEED, network)
+
+        before = PSBTParser.sig_count(psbt)
+        psbt.sign_with(root)
+        after = PSBTParser.sig_count(psbt)
+
+        # A partial signature was added to the P2WPKH input.
+        assert after > before
+        # Per-input ECDH share + DLEQ proof were populated for the SP output.
+        assert len(psbt.inputs[0].sp_ecdh_shares) == 1
+        assert len(psbt.inputs[0].sp_dleq_proofs) == 1
+
+    def test_trim_preserves_sp_fields_and_reparses(self):
+        from seedsigner.models.psbt_parser import PSBTParser
+        from embit.silent_payments import SilentPaymentsPSBT
+
+        network = SettingsConstants.REGTEST
+        psbt = build_sp_psbt(network=network)
+        root = self._root_for(SENDER_SEED, network)
+        psbt.sign_with(root)
+
+        trimmed = PSBTParser.trim(psbt)
+        reparsed = SilentPaymentsPSBT.parse(trimmed.serialize())
+
+        # v2 + SP fields survive the trim/serialize round-trip.
+        assert reparsed.version == 2
+        assert any(getattr(out, "sp_data", None) is not None for out in reparsed.outputs)
+        assert len(reparsed.inputs[0].sp_ecdh_shares) == 1
+        assert PSBTParser.sig_count(reparsed) >= 1
