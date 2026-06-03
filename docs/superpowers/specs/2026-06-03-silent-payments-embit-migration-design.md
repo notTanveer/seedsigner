@@ -13,10 +13,10 @@ SeedSigner onto that branch, makes the SP signing path actually functional (it i
 code today), removes obsolete code introduced by the earlier attempt, and adds test
 coverage.
 
-**Scope:** make SP signing work end-to-end + cleanup + tests. **No new SP UI features**
-beyond what already exists (the SP address export view stays). Remaining UI phases — SP
-indicator in PSBT review, address-explorer SP mode, on-device SP address verification, and
-label-selection UI — are explicitly deferred.
+**Scope:** make SP signing work end-to-end + cleanup + tests, plus formalize **"Single-Sig
+SP" as a first-class receive-side policy type** (exposed only in the seed export / xpub
+flow). Remaining UI phases — SP indicator in PSBT review, address-explorer SP mode, on-device
+SP address verification, and label-selection UI — are explicitly deferred.
 
 ## Background: why the current implementation does not work
 
@@ -72,7 +72,9 @@ embit; we follow the simpler single-`sign_with()` flow of `feat/sp-phase2`.
 
 ## Decisions (from brainstorming)
 
-1. **Scope:** make signing work + cleanup + tests; no new SP UI features.
+1. **Scope:** make signing work + cleanup + tests, plus formalize "Single-Sig SP" as a
+   first-class receive-side policy type in the seed export / xpub flow only (see dedicated
+   section). No other new SP UI (Address Explorer / Verify Address / labels deferred).
 2. **embit pin:** `requirements.txt` pins `diybitcoinhardware/embit` at commit
    `36e60e41f7cf7e4ea24efd2e379e337b1f0a1db9` (tip of `feat/sp-phase2` as of 2026-06-03).
    The local editable install at `/home/sahil/dev/embit` is checked out to the **same
@@ -105,6 +107,39 @@ is trivially mockable in tests, and matches SeedSigner's `helpers/` convention.
 Rejected alternative (Approach A): direct `SilentPaymentsPSBT` substitution with a
 `try/except` guard repeated at each call site. Simpler per-site, but scatters the
 availability logic across `decode_qr`, `psbt_parser`, `encode_qr`, and `controller`.
+
+## "Single-Sig SP" policy type (receive side)
+
+Mirrors Krux, which models Silent Payments as a distinct policy type
+(`TYPE_SILENT_PAYMENT`, display name **"Single-sig SP"**) that forces P2TR internally and
+whose **only** address output is the `sp1...` reusable address — it never derives normal
+addresses.
+
+SeedSigner already has the right shape: `SettingsConstants.SILENT_PAYMENT = "sp"` is a
+policy-type constant, the dedicated `SETTING__SILENT_PAYMENTS` opt-in toggle gates it, and
+`SeedExportXpubSigTypeView` already surfaces it as a third policy choice that routes to the
+SP-address-only `SeedSPAddressExportView`. This work formalizes and renames it:
+
+- **Display name → "Single-Sig SP"** (was "Silent Payment"), matching Krux.
+- **Receive surface: seed export / xpub flow only.** When "Single-Sig SP" is chosen, the
+  flow skips the script-type screen and shows only the `sp1...` address as a static QR. No
+  normal addresses are ever produced for this policy.
+- **Do NOT add `SILENT_PAYMENT` to `ALL_SIG_TYPES`.** That list feeds the
+  `SETTING__SIG_TYPES` multiselect (and defaults to all-enabled), which would force SP on by
+  default and conflict with the opt-in `SETTING__SILENT_PAYMENTS` toggle. SP stays gated by
+  its own feature flag; the export view appends the "Single-Sig SP" button conditionally on
+  `_sp_enabled()`.
+- **Address Explorer and Verify Address are NOT changed** (deferred — see Out of scope).
+
+### Send side is orthogonal (any policy can pay an SP recipient)
+
+Sending to an `sp1...` address works regardless of the signer's own policy type. SP-output
+detection in `PSBTParser` (`has_sp_outputs`, the `_parse_outputs` SP branch) keys off the
+PSBT's `sp_data`, not the wallet policy, so a single-sig segwit/taproot/etc. PSBT that pays
+an SP recipient is handled the same way. The only constraint is **BIP-352 input
+eligibility** (inputs must be P2WPKH/P2SH-P2WPKH/P2TR/etc., not bare multisig); embit
+enforces this in `sign_with()` and ineligible PSBTs surface as `PSBTSigningErrorView`. No
+policy gating is added on the send path.
 
 ## Detailed changes
 
@@ -158,7 +193,10 @@ availability logic across `decode_qr`, `psbt_parser`, `encode_qr`, and `controll
 
 ### `views/seed_views.py`
 - Update `_sp_enabled()` to the simple enabled/disabled check.
-- Keep `SeedExportXpubSigTypeView` SP option routing and `SeedSPAddressExportView`.
+- Rename the SP `ButtonOption` label "Silent Payment" → **"Single-Sig SP"** in
+  `SeedExportXpubSigTypeView`; keep its routing to `SeedSPAddressExportView` (SP address
+  only, skips script-type selection).
+- Keep `SeedSPAddressExportView` (already correct against `feat/sp-phase2`).
 
 ## Testing
 
@@ -174,6 +212,10 @@ availability logic across `decode_qr`, `psbt_parser`, `encode_qr`, and `controll
 - **`get_psbt_cls()`** resolver test (returns SP class when available; vanilla on
   ImportError, e.g. via mock).
 - **Flow test** for the SP finalize path through `PSBTFinalizeView`.
+- **Flow test** for the "Single-Sig SP" receive path: with the SP setting enabled,
+  `SeedExportXpubSigTypeView` shows the "Single-Sig SP" option and routes to
+  `SeedSPAddressExportView` (skipping script-type selection); with it disabled, the option
+  is absent. Update `test_flows_seed.py` accordingly.
 - **Regression:** run the full suite; confirm non-SP v0 and v2 flows are unchanged.
 
 ## Compatibility concerns and edge cases
