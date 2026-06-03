@@ -18,6 +18,7 @@ from seedsigner.helpers.ur2.ur_decoder import URDecoder
 from seedsigner.models.qr_type import QRType
 from seedsigner.models.seed import Seed
 from seedsigner.models.settings import SettingsConstants
+from seedsigner.helpers.embit_utils import get_psbt_cls
 
 
 logger = logging.getLogger(__name__)
@@ -150,7 +151,7 @@ class DecodeQR:
             data = self.get_data_psbt()
             if data != None:
                 try:
-                    return psbt.PSBT.parse(data)
+                    return get_psbt_cls().parse(data)
                 except:
                     return None
         return None
@@ -459,7 +460,7 @@ class DecodeQR:
     def is_base64_psbt(s):
         try:
             if DecodeQR.is_base64(s):
-                psbt.PSBT.parse(a2b_base64(s))
+                get_psbt_cls().parse(a2b_base64(s))
                 return True
         except Exception:
             return False
@@ -469,7 +470,7 @@ class DecodeQR:
     @staticmethod
     def is_base43_psbt(s):
         try:
-            psbt.PSBT.parse(DecodeQR.base43_decode(s))
+            get_psbt_cls().parse(DecodeQR.base43_decode(s))
             return True
         except Exception:
             return False
