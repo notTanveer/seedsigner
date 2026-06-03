@@ -132,3 +132,26 @@ class TestPsbtParserSpSignAndTrim(BaseTest):
         assert any(getattr(out, "sp_data", None) is not None for out in reparsed.outputs)
         assert len(reparsed.inputs[0].sp_ecdh_shares) == 1
         assert PSBTParser.sig_count(reparsed) >= 1
+
+
+class TestFinalizeViewSpSigning(BaseTest):
+    def test_finalize_signs_sp_psbt(self):
+        from unittest.mock import patch
+        from seedsigner.models.psbt_parser import PSBTParser
+        from seedsigner.views.psbt_views import PSBTFinalizeView, PSBTSignedQRDisplayView
+
+        # BaseTest.setup_method() already configured self.controller (the singleton).
+        network = SettingsConstants.REGTEST
+        psbt = build_sp_psbt(network=network)
+        self.controller.psbt = psbt
+        self.controller.psbt_parser = PSBTParser(p=psbt, seed=SENDER_SEED, network=network)
+        self.controller.psbt_seed = SENDER_SEED
+
+        # Simulate the user pressing "Approve" (button index 0, not BACK).
+        with patch.object(PSBTFinalizeView, "run_screen", return_value=0):
+            dest = PSBTFinalizeView().run()
+
+        assert dest.View_cls is PSBTSignedQRDisplayView
+        # Controller now holds a signed, SP-preserving PSBT.
+        assert PSBTParser.sig_count(self.controller.psbt) >= 1
+        assert any(getattr(out, "sp_data", None) is not None for out in self.controller.psbt.outputs)

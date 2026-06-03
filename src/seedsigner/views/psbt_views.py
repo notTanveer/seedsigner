@@ -1,3 +1,4 @@
+import logging
 from gettext import gettext as _
 
 from seedsigner.models.psbt_parser import PSBTParser
@@ -6,6 +7,7 @@ from seedsigner.gui.components import FontAwesomeIconConstants, SeedSignerIconCo
 from seedsigner.gui.screens.screen import (RET_CODE__BACK_BUTTON, ButtonListScreen, ButtonOption, WarningScreen, DireWarningScreen, QRDisplayScreen)
 from seedsigner.views.view import BackStackView, MainMenuView, NotYetImplementedView, View, Destination
 
+logger = logging.getLogger(__name__)
 
 
 class PSBTSelectSeedView(View):
@@ -538,17 +540,21 @@ class PSBTFinalizeView(View):
             return Destination(BackStackView)
 
         else:
-            # Sign PSBT
+            # Sign PSBT. `psbt` is a SilentPaymentsPSBT (a PSBT superset), so sign_with()
+            # transparently handles both standard and Silent Payment signing — for SP it
+            # also populates per-input ECDH shares + DLEQ proofs (entropy via embit's
+            # internal urandom).
             sig_cnt = PSBTParser.sig_count(psbt)
 
-            if psbt_parser.has_sp_outputs:
-                import os
-                aux_rand = os.urandom(32)
-                psbt_parser.sign_sp(aux_rand=aux_rand)
-                trimmed_psbt = PSBTParser.trim(psbt)
-            else:
+            try:
                 psbt.sign_with(psbt_parser.root)
-                trimmed_psbt = PSBTParser.trim(psbt)
+            except Exception as e:
+                # e.g. embit SPValidationError for ineligible SP inputs (multisig,
+                # non-SIGHASH_ALL). Surface as the standard signing-error screen.
+                logger.error(f"PSBT signing failed: {repr(e)}")
+                return Destination(PSBTSigningErrorView)
+
+            trimmed_psbt = PSBTParser.trim(psbt)
 
             if sig_cnt == PSBTParser.sig_count(trimmed_psbt):
                 # Signing failed / didn't do anything
