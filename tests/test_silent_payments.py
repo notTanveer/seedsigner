@@ -182,3 +182,90 @@ class TestSilentPaymentsSetting(BaseTest):
 
         assert not hasattr(SettingsConstants, "OPTION__ENABLED_WITH_LABELS")
         assert not hasattr(SettingsConstants, "OPTIONS__SILENT_PAYMENTS")
+
+
+def build_non_sp_psbt(sender_seed=SENDER_SEED, recipient_seed=RECIPIENT_SEED,
+                      network=SettingsConstants.REGTEST, value=100_000, fee=1_000):
+    """Build a PSBTv2 with one P2WPKH input and one ordinary P2WPKH output (no SP)."""
+    from embit.silent_payments import SilentPaymentsPSBT
+    from embit.silent_payments.psbt import SPInputScope, SPOutputScope
+
+    root = _root(sender_seed, network)
+    child = root.derive([0, 0])
+    pub = child.get_public_key()
+
+    psbt = SilentPaymentsPSBT.create_v2()
+
+    inp = SPInputScope()
+    inp.txid = bytes([0xBB] * 32)
+    inp.vout = 0
+    inp.sequence = 0xFFFFFFFE
+    inp.witness_utxo = TransactionOutput(value=value, script_pubkey=p2wpkh(pub))
+    inp.bip32_derivations[pub] = DerivationPath(root.my_fingerprint, [0, 0])
+    psbt.add_input(inp)
+
+    recipient_pub = _root(recipient_seed, network).derive([0, 0]).get_public_key()
+    out = SPOutputScope()
+    out.value = value - fee
+    out.script_pubkey = p2wpkh(recipient_pub)
+    psbt.add_output(out)
+
+    psbt.tx_modifiable_flags = 0
+    return psbt
+
+
+class TestTrimNonSp(BaseTest):
+    def test_non_sp_trim_rebuilds_and_preserves_signature(self):
+        from seedsigner.models.psbt_parser import PSBTParser
+
+        network = SettingsConstants.REGTEST
+        psbt = build_non_sp_psbt(network=network)
+        root = _root(SENDER_SEED, network)
+        psbt.sign_with(root)
+
+        # No SP outputs, so trim() takes the standard rebuild-from-tx path.
+        assert not any(getattr(out, "sp_data", None) is not None for out in psbt.outputs)
+
+        trimmed = PSBTParser.trim(psbt)
+        # Non-SP path rebuilds a fresh PSBT (the SP path returns the same object).
+        assert trimmed is not psbt
+        assert PSBTParser.sig_count(trimmed) >= 1
+
+
+class TestFinalizeViewSigningError(BaseTest):
+    def test_signing_exception_routes_to_error_view(self):
+        from unittest.mock import patch
+        from embit.silent_payments import SPValidationError
+        from seedsigner.models.psbt_parser import PSBTParser
+        from seedsigner.views.psbt_views import PSBTFinalizeView, PSBTSigningErrorView
+
+        network = SettingsConstants.REGTEST
+        psbt = build_sp_psbt(network=network)
+        self.controller.psbt = psbt
+        self.controller.psbt_parser = PSBTParser(p=psbt, seed=SENDER_SEED, network=network)
+        self.controller.psbt_seed = SENDER_SEED
+
+        # Force sign_with to raise (mimics embit rejecting an ineligible SP input);
+        # PSBTFinalizeView must catch it and route to the signing-error screen.
+        with patch.object(PSBTFinalizeView, "run_screen", return_value=0):
+            with patch.object(type(psbt), "sign_with", side_effect=SPValidationError("ineligible input")):
+                dest = PSBTFinalizeView().run()
+
+        assert dest.View_cls is PSBTSigningErrorView
+
+
+class TestGetPsbtClsFallback(BaseTest):
+    def test_falls_back_to_vanilla_psbt_on_importerror(self):
+        import builtins
+        from unittest.mock import patch
+        from embit.psbt import PSBT as VanillaPSBT
+
+        real_import = builtins.__import__
+
+        def fake_import(name, *args, **kwargs):
+            if name == "embit.silent_payments":
+                raise ImportError("simulated missing SP support")
+            return real_import(name, *args, **kwargs)
+
+        with patch("builtins.__import__", side_effect=fake_import):
+            assert get_psbt_cls() is VanillaPSBT
