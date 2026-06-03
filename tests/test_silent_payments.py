@@ -75,3 +75,20 @@ class TestDecodeSpPsbt(BaseTest):
 
         assert isinstance(parsed, SilentPaymentsPSBT)
         assert any(getattr(out, "sp_data", None) is not None for out in parsed.outputs)
+
+
+class TestPsbtParserSpReadSide(BaseTest):
+    def test_has_sp_outputs_and_destination_address(self):
+        from seedsigner.models.psbt_parser import PSBTParser
+
+        network = SettingsConstants.REGTEST
+        psbt = build_sp_psbt(network=network)
+
+        parser = PSBTParser(p=psbt, seed=SENDER_SEED, network=network)
+
+        assert parser.has_sp_outputs is True
+        assert parser.num_destinations == 1
+        # The parsed destination must equal the recipient's BIP-352 SP address.
+        assert parser.destination_addresses[0] == RECIPIENT_SEED.get_sp_address(network=network)
+        assert parser.destination_amounts[0] == 99_000
+        assert parser.spend_amount == 99_000

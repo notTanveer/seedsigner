@@ -8,11 +8,6 @@ from embit.ec import PublicKey
 from io import BytesIO
 from typing import List
 
-try:
-    from embit.silent_payments.psbt import SPOutputScope
-    _SP_AVAILABLE = True
-except ImportError:
-    _SP_AVAILABLE = False
 
 from seedsigner.models.seed import Seed
 from seedsigner.models.settings import SettingsConstants
@@ -73,13 +68,10 @@ class PSBTParser():
 
     @property
     def has_sp_outputs(self) -> bool:
-        if not _SP_AVAILABLE:
-            return False
         return any(getattr(out, "sp_data", None) is not None for out in self.psbt.outputs)
 
 
     def _get_sp_address(self, out) -> str:
-        from embit.silent_payments.bip352 import generate_silent_payment_address, decode_silent_payment_address
         from embit import bech32
         sp_data = out.sp_data
         payload = sp_data.scan_key.sec() + sp_data.spend_key.sec()
@@ -144,7 +136,7 @@ class PSBTParser():
         self.destination_amounts = []
         for i, out in enumerate(self.psbt.outputs):
             # SP outputs have no script_pubkey yet and are never change
-            if _SP_AVAILABLE and getattr(out, "sp_data", None) is not None:
+            if getattr(out, "sp_data", None) is not None:
                 sp_addr = self._get_sp_address(out)
                 self.destination_addresses.append(sp_addr)
                 self.destination_amounts.append(self.psbt.tx.vout[i].value)
@@ -260,8 +252,6 @@ class PSBTParser():
 
     def sign_sp(self, aux_rand: bytes = None):
         """SP-aware signing: clear untrusted fields, populate ECDH+DLEQ, derive output scripts, validate, sign."""
-        if not _SP_AVAILABLE:
-            raise RuntimeError("Silent Payments support requires the embit fork with silent_payments")
         from embit.silent_payments import populate_silent_payment_send_data
         from embit.silent_payments.validator import BIP375Validator
 
@@ -297,19 +287,18 @@ class PSBTParser():
                 trimmed_psbt.inputs[i].partial_sigs = inp.partial_sigs
 
         # Preserve SP fields if present
-        if _SP_AVAILABLE:
+        for attr in ("sp_ecdh_shares", "sp_dleq_proofs"):
+            if hasattr(tx, attr) and getattr(tx, attr):
+                setattr(trimmed_psbt, attr, getattr(tx, attr))
+        for i, inp in enumerate(tx.inputs):
             for attr in ("sp_ecdh_shares", "sp_dleq_proofs"):
-                if hasattr(tx, attr) and getattr(tx, attr):
-                    setattr(trimmed_psbt, attr, getattr(tx, attr))
-            for i, inp in enumerate(tx.inputs):
-                for attr in ("sp_ecdh_shares", "sp_dleq_proofs"):
-                    if hasattr(inp, attr) and getattr(inp, attr):
-                        setattr(trimmed_psbt.inputs[i], attr, getattr(inp, attr))
-            for i, out in enumerate(tx.outputs):
-                if getattr(out, "sp_data", None) is not None:
-                    trimmed_psbt.outputs[i].sp_data = out.sp_data
-                if getattr(out, "sp_label", None) is not None:
-                    trimmed_psbt.outputs[i].sp_label = out.sp_label
+                if hasattr(inp, attr) and getattr(inp, attr):
+                    setattr(trimmed_psbt.inputs[i], attr, getattr(inp, attr))
+        for i, out in enumerate(tx.outputs):
+            if getattr(out, "sp_data", None) is not None:
+                trimmed_psbt.outputs[i].sp_data = out.sp_data
+            if getattr(out, "sp_label", None) is not None:
+                trimmed_psbt.outputs[i].sp_label = out.sp_label
 
         return trimmed_psbt
 
