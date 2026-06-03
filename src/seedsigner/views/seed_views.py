@@ -673,6 +673,11 @@ class SeedExportXpubSigTypeView(View):
 
 
     def _sp_enabled(self) -> bool:
+        from seedsigner.helpers.embit_utils import is_silent_payments_available
+        if not is_silent_payments_available():
+            # embit build lacks Silent Payments support; hide the option rather than
+            # crash later when deriving the SP address.
+            return False
         return self.settings.get_value(SettingsConstants.SETTING__SILENT_PAYMENTS) != SettingsConstants.OPTION__DISABLED
 
 

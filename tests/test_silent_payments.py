@@ -269,3 +269,24 @@ class TestGetPsbtClsFallback(BaseTest):
 
         with patch("builtins.__import__", side_effect=fake_import):
             assert get_psbt_cls() is VanillaPSBT
+
+
+class TestSilentPaymentsAvailabilityGate(BaseTest):
+    def test_is_silent_payments_available_true_when_present(self):
+        from seedsigner.helpers.embit_utils import is_silent_payments_available
+        assert is_silent_payments_available() is True
+
+    def test_sp_export_option_gated_on_embit_availability(self):
+        from unittest.mock import patch
+        from seedsigner.views.seed_views import SeedExportXpubSigTypeView
+
+        view = SeedExportXpubSigTypeView(seed_num=0)
+        self.settings.set_value(SettingsConstants.SETTING__SILENT_PAYMENTS, SettingsConstants.OPTION__ENABLED)
+
+        # SP available + setting enabled -> feature on.
+        assert view._sp_enabled() is True
+
+        # SP unavailable -> feature hidden regardless of the setting, so the flow
+        # never reaches the SP address derivation that would otherwise crash.
+        with patch("seedsigner.helpers.embit_utils.is_silent_payments_available", return_value=False):
+            assert view._sp_enabled() is False

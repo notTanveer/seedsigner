@@ -34,6 +34,19 @@ def get_psbt_cls():
         return PSBT
 
 
+def is_silent_payments_available() -> bool:
+    """True if the installed embit provides BIP-352 Silent Payments support.
+
+    Used to gate the SP feature so a build whose embit lacks `silent_payments`
+    degrades gracefully (the option is hidden) instead of raising at runtime.
+    """
+    try:
+        import embit.silent_payments  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
 # TODO: Refactor `wallet_type` to conform to our `sig_type` naming convention
 def get_standard_derivation_path(network: str = SettingsConstants.MAINNET, wallet_type: str = SettingsConstants.SINGLE_SIG, script_type: str = SettingsConstants.NATIVE_SEGWIT) -> str:
     if network == SettingsConstants.MAINNET:
