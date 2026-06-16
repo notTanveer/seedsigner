@@ -82,6 +82,24 @@ class PSBTSelectSeedView(View):
 
 
 
+class PSBTSilentPaymentsDisabledView(View):
+    """Shown when a scanned PSBT uses Silent Payments but the SP setting is disabled."""
+    OK = ButtonOption("OK")
+
+    def run(self):
+        self.run_screen(
+            WarningScreen,
+            title=_("Silent Payments"),
+            status_icon_name=SeedSignerIconConstants.WARNING,
+            status_headline=_("SP Disabled"),
+            # TRANSLATOR_NOTE: Shown when a transaction needs Silent Payments but the feature is turned off.
+            text=_("This transaction uses Silent Payments. Enable Silent Payments in Settings to sign it."),
+            button_data=[self.OK],
+        )
+        return Destination(MainMenuView)
+
+
+
 class PSBTOverviewView(View):
     def __init__(self):
         super().__init__()
@@ -145,6 +163,7 @@ class PSBTOverviewView(View):
             num_change_outputs=num_change_outputs,
             destination_addresses=psbt_parser.destination_addresses,
             has_op_return=psbt_parser.op_return_data is not None,
+            is_silent_payment_spend=psbt_parser.has_sp_spend_inputs,
         )
 
         if selected_menu_num == RET_CODE__BACK_BUTTON:
@@ -262,7 +281,14 @@ class PSBTAddressDetailsView(View):
 
         # TRANSLATOR_NOTE: Future-tense used to indicate that this transaction will send this amount, as opposed to "Send" on its own which could be misread as an instant command (e.g. "Send Now").
         title = _("Will Send")
-        if psbt_parser.num_destinations > 1:
+        is_sp = psbt_parser.destination_is_sp[self.address_num]
+        has_multi = psbt_parser.num_destinations > 1
+        if is_sp and has_multi:
+            title += f" (SP #{self.address_num + 1})"
+        elif is_sp:
+            # TRANSLATOR_NOTE: Marks the recipient address as a Silent Payments output.
+            title += f" ({_('SP')})"
+        elif has_multi:
             title += f" (#{self.address_num + 1})"
 
         button_data = []
@@ -538,20 +564,29 @@ class PSBTFinalizeView(View):
             return Destination(BackStackView)
 
         else:
-            # Sign PSBT
-            sig_cnt = PSBTParser.sig_count(psbt)
-            psbt.sign_with(psbt_parser.root)
-            trimmed_psbt = PSBTParser.trim(psbt)
-
-            if sig_cnt == PSBTParser.sig_count(trimmed_psbt):
-                # Signing failed / didn't do anything
-                # TODO: Reserved for Nick. Are there different failure scenarios that we can detect?
-                # Would be nice to alter the message on the next screen w/more detail.
-                return Destination(PSBTSigningErrorView)
-            
+            if psbt_parser.has_sp_outputs:
+                from seedsigner.helpers import embit_utils
+                try:
+                    sig_result = embit_utils.sign_sp_psbt(psbt, psbt_parser.root)
+                except Exception as e:
+                    return Destination(PSBTSPValidationErrorView, view_args=dict(error=str(e)))
+                if sig_result == 0:
+                    return Destination(PSBTSigningErrorView)
+                from embit.silent_payments.validator import BIP375Validator
+                try:
+                    BIP375Validator(psbt).validate(skip_output_scripts=False)
+                except Exception as e:
+                    return Destination(PSBTSPValidationErrorView, view_args=dict(error=str(e)))
             else:
-                self.controller.psbt = trimmed_psbt
-                return Destination(PSBTSignedQRDisplayView)
+                progress_before = PSBTParser.sig_count(psbt) + PSBTParser.sp_contribution_count(psbt)
+                psbt.sign_with(psbt_parser.root)
+                if PSBTParser.sig_count(psbt) + PSBTParser.sp_contribution_count(psbt) == progress_before:
+                    # TODO: Reserved for Nick. Are there different failure scenarios that we can detect?
+                    # Would be nice to alter the message on the next screen w/more detail.
+                    return Destination(PSBTSigningErrorView)
+
+            self.controller.psbt = PSBTParser.trim(psbt)
+            return Destination(PSBTSignedQRDisplayView)
 
 
 
@@ -594,6 +629,37 @@ class PSBTSigningErrorView(View):
             # clear seed selected for psbt signing since it did not add a valid signature
             self.controller.psbt_seed = None
             return Destination(PSBTSelectSeedView, clear_history=True)
+
+        if selected_menu_num == RET_CODE__BACK_BUTTON:
+            return Destination(BackStackView)
+
+
+
+class PSBTSPValidationErrorView(View):
+    SELECT_DIFF_SEED = ButtonOption("Select different seed")
+    # TRANSLATOR_NOTE: Button to abandon the current transaction and return to the main menu.
+    CANCEL = ButtonOption("Cancel")
+
+    def __init__(self, error: str = ""):
+        super().__init__()
+        self.error = error
+
+    def run(self):
+        selected_menu_num = self.run_screen(
+            WarningScreen,
+            title=_("SP Signing Error"),
+            status_icon_name=SeedSignerIconConstants.WARNING,
+            status_headline=_("Invalid Silent Payments PSBT"),
+            text=self.error,
+            button_data=[self.SELECT_DIFF_SEED, self.CANCEL]
+        )
+
+        if selected_menu_num == 0:
+            self.controller.psbt_seed = None
+            return Destination(PSBTSelectSeedView, clear_history=True)
+
+        if selected_menu_num == 1:
+            return Destination(MainMenuView, clear_history=True)
 
         if selected_menu_num == RET_CODE__BACK_BUTTON:
             return Destination(BackStackView)

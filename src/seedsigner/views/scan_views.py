@@ -90,8 +90,18 @@ class ScanView(View):
                         return Destination(SeedFinalizeView)
             
             elif self.decoder.is_psbt:
-                from seedsigner.views.psbt_views import PSBTSelectSeedView
-                psbt = self.decoder.get_psbt()
+                from seedsigner.views.psbt_views import PSBTSelectSeedView, PSBTSilentPaymentsDisabledView
+                from seedsigner.helpers import embit_utils
+
+                sp_setting_on = self.settings.get_value(
+                    SettingsConstants.SETTING__BIP352_SILENT_PAYMENTS
+                ) == SettingsConstants.OPTION__ENABLED
+
+                psbt = self.decoder.get_psbt(sp_enabled=embit_utils.is_silent_payments_available())
+
+                if not sp_setting_on and psbt is not None and embit_utils.psbt_has_sp_content(psbt):
+                    return Destination(PSBTSilentPaymentsDisabledView, skip_current_view=True)
+
                 self.controller.psbt = psbt
                 self.controller.psbt_parser = None
                 return Destination(PSBTSelectSeedView, skip_current_view=True)
