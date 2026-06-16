@@ -34,6 +34,7 @@ class PSBTParser():
         self.num_inputs = 0
         self.destination_addresses = []
         self.destination_amounts = []
+        self.destination_is_sp = []
         self.op_return_data: bytes = None
 
         self.root = None
@@ -63,6 +64,18 @@ class PSBTParser():
     @property
     def num_destinations(self):
         return len(self.destination_addresses)
+
+
+    @property
+    def has_sp_outputs(self):
+        """True if any output pays to a silent payment address (BIP-375)."""
+        return PSBTParser._psbt_has_sp_outputs(self.psbt)
+
+
+    @property
+    def has_sp_spend_inputs(self):
+        """True if any input spends a received silent payment output (BIP-376)."""
+        return PSBTParser._psbt_has_sp_spend_inputs(self.psbt)
 
 
     def _set_root(self):
@@ -119,7 +132,19 @@ class PSBTParser():
         self.fee_amount = 0
         self.destination_addresses = []
         self.destination_amounts = []
+        self.destination_is_sp = []
         for i, out in enumerate(self.psbt.outputs):
+            sp_data = getattr(out, "sp_data", None)
+            if sp_data is not None:
+                from seedsigner.helpers import embit_utils
+                self.destination_addresses.append(
+                    embit_utils.encode_sp_address(sp_data.scan_key, sp_data.spend_key, self.network)
+                )
+                self.destination_amounts.append(self.psbt.tx.vout[i].value)
+                self.destination_is_sp.append(True)
+                self.spend_amount += self.psbt.tx.vout[i].value
+                continue
+
             out_policy = PSBTParser._get_policy(out, self.psbt.tx.vout[i].script_pubkey, self.psbt.xpubs)
             is_change = False
 
@@ -221,6 +246,7 @@ class PSBTParser():
                 addr = self.psbt.tx.vout[i].script_pubkey.address(NETWORKS[SettingsConstants.map_network_to_embit(self.network)])
                 self.destination_addresses.append(addr)
                 self.destination_amounts.append(self.psbt.tx.vout[i].value)
+                self.destination_is_sp.append(False)
                 self.spend_amount += self.psbt.tx.vout[i].value
 
         self.fee_amount = self.psbt.fee()
@@ -228,7 +254,42 @@ class PSBTParser():
 
 
     @staticmethod
+    def _psbt_has_sp_outputs(p):
+        return any(getattr(o, "sp_data", None) is not None for o in p.outputs)
+
+
+    @staticmethod
+    def _psbt_has_sp_spend_inputs(p):
+        return any(getattr(i, "sp_tweak", None) is not None for i in p.inputs)
+
+
+    @staticmethod
+    def sp_contribution_count(p):
+        """Counts Silent Payments signing progress: SP spend signatures (a
+        taproot_key_sig on an input carrying sp_tweak, BIP-376) plus per-input
+        ECDH shares contributed to SP outputs (BIP-375). PSBTs without SP fields
+        always return 0."""
+        cnt = 0
+        for inp in p.inputs:
+            if getattr(inp, "sp_tweak", None) is not None and getattr(inp, "taproot_key_sig", None) is not None:
+                cnt += 1
+            cnt += len(getattr(inp, "sp_ecdh_shares", {}) or {})
+        return cnt
+
+
+    @staticmethod
     def trim(tx):
+        if PSBTParser._psbt_has_sp_outputs(tx):
+            for inp in tx.inputs:
+                if inp.witness_utxo is not None:
+                    inp.non_witness_utxo = None
+                inp.bip32_derivations.clear()
+            return tx
+
+        if PSBTParser._psbt_has_sp_spend_inputs(tx):
+            from embit.silent_payments import finalize_sp_spends
+            finalize_sp_spends(tx)
+
         trimmed_psbt = psbt.PSBT(tx.tx)
         for i, inp in enumerate(tx.inputs):
             if inp.final_scriptwitness:

@@ -25,11 +25,15 @@ class PSBTOverviewScreen(ButtonListScreen):
     num_change_outputs: int = 0
     destination_addresses: list[str] = None
     has_op_return: bool = False
+    is_silent_payment_spend: bool = False
     
 
     def __post_init__(self):
         # Customize defaults
-        self.title = _("Review Transaction")
+        if self.is_silent_payment_spend:
+            self.title = _("Review SP Spend")
+        else:
+            self.title = _("Review Transaction")
         self.is_bottom_list = True
         self.button_data = [ButtonOption("Review details")]
 
