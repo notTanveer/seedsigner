@@ -1,5 +1,6 @@
 import pytest
 
+from binascii import unhexlify
 from seedsigner.models.settings_definition import SettingsConstants as SC
 from seedsigner.helpers import embit_utils
 
@@ -374,6 +375,34 @@ def test_get_multisig_policy():
         ))
 
 
+def test_get_psbt_cls_returns_sp_class_when_enabled():
+    from embit.silent_payments import SilentPaymentsPSBT
+    from seedsigner.helpers import embit_utils
+    assert embit_utils.get_psbt_cls(sp_enabled=True) is SilentPaymentsPSBT
+
+
+def test_get_psbt_cls_returns_vanilla_when_disabled():
+    from embit.psbt import PSBT
+    from seedsigner.helpers import embit_utils
+    assert embit_utils.get_psbt_cls(sp_enabled=False) is PSBT
+
+
+def test_encode_sp_address_roundtrips_with_embit_decoder():
+    from binascii import unhexlify
+    from embit import ec
+    from embit.silent_payments.bip352 import decode_silent_payment_address
+    from seedsigner.helpers import embit_utils
+    from seedsigner.models.settings_definition import SettingsConstants
+    from sp_testing_util import SCAN_HEX, SPEND_HEX
+    scan_pub = ec.PublicKey.parse(unhexlify(SCAN_HEX))
+    spend_pub = ec.PublicKey.parse(unhexlify(SPEND_HEX))
+    addr = embit_utils.encode_sp_address(scan_pub, spend_pub, SettingsConstants.MAINNET)
+    assert addr.startswith("sp1")
+    decoded_scan, decoded_spend = decode_silent_payment_address(addr)
+    assert decoded_scan.sec() == scan_pub.sec()
+    assert decoded_spend.sec() == spend_pub.sec()
+
+
 def test_parse_derivation_path():
     # Shouldn't care if input uses "'" or "h"
     derivation_path = "m/84'/0'/0'/0/0"
@@ -455,3 +484,5 @@ def test_parse_derivation_path():
             assert actual_result["index"] == expected_result[3]
         else:
             assert actual_result["index"] == int(derivation_path.split("/")[-1])
+
+

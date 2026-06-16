@@ -145,12 +145,13 @@ class DecodeQR:
     # TODO: Refactor all of these specific `get_` to just something generic like
     #   `get_data` and let each QRDecoder class return whatever it needs to as a
     #   str, tuple, dict, etc?
-    def get_psbt(self):
+    def get_psbt(self, sp_enabled: bool = False):
         if self.complete:
             data = self.get_data_psbt()
             if data != None:
+                from seedsigner.helpers import embit_utils
                 try:
-                    return psbt.PSBT.parse(data)
+                    return embit_utils.get_psbt_cls(sp_enabled).parse(data)
                 except:
                     return None
         return None

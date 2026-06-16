@@ -188,6 +188,223 @@ def parse_derivation_path(derivation_path: str) -> dict:
 
 
 
+def is_silent_payments_available() -> bool:
+    """True if the installed embit build ships the silent_payments module."""
+    try:
+        import embit.silent_payments  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
+def get_psbt_cls(sp_enabled: bool) -> type:
+    """Resolve the PSBT class to parse with. Returns SilentPaymentsPSBT (a strict
+    superset of PSBT) only when Silent Payments is enabled AND available, so SP
+    fields survive parsing; otherwise vanilla PSBT."""
+    from embit.psbt import PSBT
+    if sp_enabled and is_silent_payments_available():
+        from embit.silent_payments import SilentPaymentsPSBT
+        return SilentPaymentsPSBT
+    return PSBT
+
+
+def psbt_has_sp_content(psbt) -> bool:
+    """True if an already-parsed PSBT carries Silent Payments fields (SP output
+    or SP spend input). Only meaningful on a PSBT parsed with the SP-aware class;
+    vanilla-parsed PSBTs never expose these attributes."""
+    has_out = any(getattr(o, "sp_data", None) is not None for o in psbt.outputs)
+    has_in = any(getattr(i, "sp_tweak", None) is not None for i in psbt.inputs)
+    return has_out or has_in
+
+
+
+def encode_sp_address(scan_pubkey: ec.PublicKey, spend_pubkey: ec.PublicKey, network: str = SettingsConstants.MAINNET) -> str:
+    """Bech32m-encode a silent payment address from the recipient's scan and spend
+    public keys (e.g. as carried in a PSBT output's sp_data). Mirrors the encoding
+    tail of embit.silent_payments.bip352.generate_silent_payment_address."""
+    from embit import bech32
+    embit_network = SettingsConstants.map_network_to_embit(network)
+    data = bech32.convertbits(scan_pubkey.sec() + spend_pubkey.sec(), 8, 5)
+    hrp = "sp" if embit_network == "main" else "tsp"
+    return bech32.bech32_encode(bech32.Encoding.BECH32M, hrp, [0] + data)
+
+
+def fill_sp_send_output_scripts(psbt, eligible=None) -> bool:
+    """BIP-375 "output generator": derive and fill each Silent Payment output's
+    taproot scriptPubKey from the ECDH shares already contributed to the PSBT's
+    eligible inputs.
+
+    Mirrors ``embit.silent_payments.validator._validate_output_scripts`` but
+    *assigns* the derived script instead of comparing it. Returns True only when
+    every SP output was resolved (the signing device controls all eligible inputs);
+    returns False and fills nothing when the per-input ECDH shares are incomplete
+    (a multi-party send this device cannot finish alone).
+
+    Pass ``eligible`` (the already-computed get_eligible_inputs result) to avoid
+    a redundant call when the caller has already computed it."""
+    from embit.script import Script
+    from embit.transaction import COutPoint
+    from embit.silent_payments.ecdh import get_eligible_inputs, input_public_key
+    from embit.silent_payments.bip352 import (
+        get_input_hash,
+        derive_silent_payment_outputs,
+    )
+    from embit.util.secp256k1 import (
+        ec_pubkey_parse,
+        ec_pubkey_combine,
+        ec_pubkey_serialize,
+        ec_pubkey_tweak_mul,
+        EC_COMPRESSED,
+    )
+
+    sp_outputs = [
+        (i, o)
+        for i, o in enumerate(psbt.outputs)
+        if getattr(o, "sp_data", None) is not None
+    ]
+    if not sp_outputs:
+        return True
+
+    if eligible is None:
+        eligible = get_eligible_inputs(psbt.inputs, has_sp_outputs=True)
+    if not eligible:
+        return False
+
+    # BIP-352 input_hash commits to the smallest outpoint over ALL inputs, while A
+    # is the sum of the eligible input public keys.
+    outpoints = [
+        COutPoint(txid=psbt.tx.vin[i].txid, out_idx=psbt.tx.vin[i].vout)
+        for i in range(len(psbt.inputs))
+    ]
+    eligible_pubkeys = [input_public_key(psbt.inputs[i]) for i in eligible]
+    if any(pk is None for pk in eligible_pubkeys):
+        # input_hash must commit to ALL eligible inputs' pubkeys; deriving it from
+        # a partial sum would pay an address the recipient can never detect.
+        return False
+    a_sum = ec_pubkey_parse(eligible_pubkeys[0].sec())
+    for pk in eligible_pubkeys[1:]:
+        a_sum = ec_pubkey_combine(a_sum, ec_pubkey_parse(pk.sec()))
+    input_hash = get_input_hash(outpoints, ec_pubkey_serialize(a_sum, EC_COMPRESSED))
+
+    # Group SP outputs by scan key, preserving output-index order so the per-group
+    # derivation counter k matches each output's position (BIP-375).
+    groups = {}
+    for out_idx, out in sp_outputs:
+        groups.setdefault(out.sp_data.scan_key.sec(), []).append((out_idx, out))
+
+    resolved = {}
+    for scan_key_bytes, group in groups.items():
+        # Sum the per-input ECDH shares for this scan key. Require a share from
+        # every eligible input, else the shared secret is incomplete.
+        share_sum = None
+        contributing = 0
+        for i in eligible:
+            share = psbt.inputs[i].sp_ecdh_shares.get(scan_key_bytes)
+            if share is None:
+                continue
+            parsed = ec_pubkey_parse(share)
+            share_sum = parsed if share_sum is None else ec_pubkey_combine(share_sum, parsed)
+            contributing += 1
+        if share_sum is None or contributing != len(eligible):
+            return False
+
+        ecdh_share = ec_pubkey_serialize(share_sum, EC_COMPRESSED)
+        adjusted = bytearray(ec_pubkey_parse(ecdh_share))
+        ec_pubkey_tweak_mul(adjusted, input_hash)
+        adjusted_share = ec_pubkey_serialize(adjusted, EC_COMPRESSED)
+
+        derived = derive_silent_payment_outputs(
+            adjusted_share,
+            [(o.sp_data.scan_key, o.sp_data.spend_key, o.sp_label) for _, o in group],
+        )
+        for pos, (out_idx, _out) in enumerate(group):
+            resolved[out_idx] = Script(b"\x51\x20" + derived[pos])
+
+    for out_idx, spk in resolved.items():
+        psbt.outputs[out_idx].script_pubkey = spk
+    return True
+
+
+def sign_sp_psbt(psbt, root) -> int:
+    """Sign a Silent Payments PSBT that pays *to* one or more SP addresses (BIP-375
+    send).
+
+    embit's ``SilentPaymentsPSBT.sign_with`` cannot run unaided here: the SP output
+    scripts are derived from the inputs' ECDH shares, yet each input's sighash
+    commits to the serialized outputs — so an unresolved SP output (``script_pubkey
+    is None``) makes ``sign_with`` crash serializing ``None``. This wrapper performs
+    the missing BIP-375 steps in the right order:
+
+      1. Verify ``root`` controls every eligible input, before anything is
+         modified. SeedSigner only supports single-signer SP sends: a foreign
+         eligible input (multi-party send) and a wrong seed each raise a
+         ``ValueError`` that names the actual problem.
+      2. Clear coordinator-supplied SP send fields, then contribute our own
+         per-input ECDH shares + DLEQ proofs (``_sign_with_sp``). As sole signer
+         we recompute everything rather than verify-and-trust incoming data.
+      3. Derive and fill the SP output scripts from those shares.
+      4. Emit PSBT-global ECDH share + DLEQ proof (required by Sparrow / BIP-375).
+      5. Sign ordinary inputs (and any BIP-376 spend inputs) over the now-correct
+         outputs.
+
+    If the PSBT carries SP outputs but no eligible input, the output scripts
+    can't be derived and we return 0 without signing. Returns embit's
+    ``sign_with`` counter (0 when nothing was signed)."""
+    from embit.silent_payments.ecdh import (
+        compute_global_ecdh_share,
+        compute_global_dleq_proof,
+        get_eligible_inputs,
+    )
+
+    scan_key_objects = {}
+    for out in psbt.outputs:
+        if getattr(out, "sp_data", None) is not None:
+            scan_key_objects[out.sp_data.scan_key.sec()] = out.sp_data.scan_key
+
+    eligible = get_eligible_inputs(psbt.inputs, has_sp_outputs=True)
+    fingerprint, _ = psbt._signing_fingerprint(root)
+    priv_keys = []
+    foreign_inputs = []
+    for i in eligible:
+        priv = psbt._resolve_input_privkey(psbt.inputs[i], root, fingerprint)
+        if priv is None:
+            foreign_inputs.append(i)
+        else:
+            priv_keys.append(priv)
+    if foreign_inputs:
+        if priv_keys:
+            raise ValueError(
+                "Silent Payment signing failed: input(s) {} belong to another "
+                "signer; multi-party Silent Payment sends are not supported.".format(
+                    ", ".join(str(i) for i in foreign_inputs)
+                )
+            )
+        raise ValueError(
+            "Silent Payment signing failed: no eligible input is controlled "
+            "by this seed (check derivation / fingerprint)."
+        )
+
+    psbt.sp_ecdh_shares.clear()
+    psbt.sp_dleq_proofs.clear()
+    for inp in psbt.inputs:
+        inp.sp_ecdh_shares.clear()
+        inp.sp_dleq_proofs.clear()
+    psbt._sign_with_sp(root)
+
+    if not fill_sp_send_output_scripts(psbt, eligible=eligible):
+        return 0
+
+    for sk_bytes, scan_key in scan_key_objects.items():
+        global_share = compute_global_ecdh_share(priv_keys, scan_key)
+        if global_share is not None:
+            psbt.sp_ecdh_shares[sk_bytes] = global_share
+            psbt.sp_dleq_proofs[sk_bytes] = compute_global_dleq_proof(
+                priv_keys, scan_key, global_share, aux_rand=None
+            )
+
+    return psbt.sign_with(root, with_sp_shares=False)
+
+
 def sign_message(seed_bytes: bytes, derivation: str, msg: bytes, compressed: bool = True, embit_network: str = "main") -> bytes:
     """
         from: https://github.com/cryptoadvance/specter-diy/blob/b58a819ef09b2bca880a82c7e122618944355118/src/apps/signmessage/signmessage.py
@@ -208,3 +425,4 @@ def sign_message(seed_bytes: bytes, derivation: str, msg: bytes, compressed: boo
     flag = bytes([27 + flag + c])
     ser = flag + secp256k1.ecdsa_signature_serialize_compact(sig._sig)
     return b2a_base64(ser).strip().decode()
+
