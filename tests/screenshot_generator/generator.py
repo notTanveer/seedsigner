@@ -316,6 +316,16 @@ def generate_screenshots(locale):
                 yield
 
 
+        @contextmanager
+        def mock_disable_dire_warnings():
+            old_value = controller.settings.get_value(SettingsConstants.SETTING__DIRE_WARNINGS)
+            controller.settings.set_value(SettingsConstants.SETTING__DIRE_WARNINGS, SettingsConstants.OPTION__DISABLED)
+            try:
+                yield
+            finally:
+                controller.settings.set_value(SettingsConstants.SETTING__DIRE_WARNINGS, old_value)
+
+
         screenshot_sections = {
             "Main Menu Views": [
                 ScreenshotConfig(OpeningSplashView, dict(force_partner_logos=True)),
@@ -364,7 +374,10 @@ def generate_screenshots(locale):
                 ScreenshotConfig(seed_views.SeedWordsView, dict(seed_num=0, page_index=2), screenshot_name="SeedWordsView_2"),
                 ScreenshotConfig(seed_views.SeedBIP85SelectNumWordsView,     dict(seed_num=0)),
                 ScreenshotConfig(seed_views.SeedBIP85SelectChildIndexView,   dict(seed_num=0, num_words=24)),
-                ScreenshotConfig(seed_views.SeedBIP85InvalidChildIndexView,  dict(seed_num=0, num_words=12)), 
+                ScreenshotConfig(seed_views.SeedBIP85InvalidChildIndexView,  dict(seed_num=0, num_words=12)),
+                ScreenshotConfig(seed_views.SeedBIP352SilentPaymentsOptionsView, dict(seed_num=0)),
+                ScreenshotConfig(seed_views.SeedBIP352GeneratePaymentAddressView, dict(seed_num=0)),
+                ScreenshotConfig(seed_views.SeedBIP352ExportSPDescriptorDetailsView, dict(seed_num=0), mock_context_manager=mock_disable_dire_warnings),
                 ScreenshotConfig(seed_views.SeedWordsBackupTestPromptView,   dict(seed_num=0)),
                 ScreenshotConfig(seed_views.SeedWordsBackupTestView,         dict(seed_num=0, rand_seed=6102)),
                 ScreenshotConfig(seed_views.SeedWordsBackupTestMistakeView,  dict(seed_num=0, cur_index=7, wrong_word="satoshi")),
